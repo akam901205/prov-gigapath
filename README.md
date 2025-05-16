@@ -131,10 +131,7 @@ with torch.no_grad():
 
 ### Tile-Level Linear Probing Example Using PCam Dataset
 
-For your convenience, we provide the pre-extracted embeddings for the PCam dataset. You can download them from the link below. Note that the file size is 2GB.
-```sh
-wget -nc https://hanoverprod.z21.web.core.windows.net/gigapath/GigaPath_PCam_embeddings.zip -P data/
-```
+For your convenience, we provide the pre-extracted embeddings for the PCam dataset. You can download them from this [link](https://huggingface.co/datasets/prov-gigapath/prov-gigapath-tile-embeddings/tree/main). Note that the file size is 2GB.
 
 There is no need to unzip this file.
 
@@ -145,9 +142,9 @@ bash scripts/run_pcam.sh data/GigaPath_PCam_embeddings.zip
 
 ### Slide-Level Fine-Tuning Example Using PANDA Dataset
 
-For your convenience, we provide the pre-extracted embeddings for the PANDA dataset. You can download them from the link below. Note that the file size is 32GB. Please unzip this file.
+For your convenience, we provide the pre-extracted embeddings for the PANDA dataset. You can download them from this [link](https://huggingface.co/datasets/prov-gigapath/prov-gigapath-tile-embeddings/tree/main). Note that the file size is 32GB. Please unzip this file.
+
 ```sh
-wget -nc https://hanoverprod.z21.web.core.windows.net/gigapath/GigaPath_PANDA_embeddings.zip -P data/
 unzip -n data/GigaPath_PANDA_embeddings.zip -d data/
 ```
 
