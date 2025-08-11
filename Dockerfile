@@ -36,7 +36,7 @@ RUN bash -lc 'if [ -f "requirements.txt" ]; then pip install -r requirements.txt
 RUN bash -lc 'if [ -f "setup.py" ] || [ -f "pyproject.toml" ]; then pip install -e . || true; fi'
 
 # ---- Add the serverless handler ----
-COPY .runpod/handler.py /workspace/handler.py
+COPY handler.py /workspace/handler.py
 
 # (Optional) Cache/weights directory
 RUN mkdir -p /workspace/model
