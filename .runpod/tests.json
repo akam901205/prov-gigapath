@@ -1,0 +1,18 @@
+{
+  "tests": [
+    {
+      "name": "test_inference",
+      "input": {
+        "image_url": "https://example.com/sample_wsi.tiff"
+      },
+      "timeout": 120000
+    }
+  ],
+  "config": {
+    "gpuTypeId": "NVIDIA T4",
+    "gpuCount": 1,
+    "allowedCudaVersions": [
+      "12.3", "12.2", "12.1", "12.0"
+    ]
+  }
+}

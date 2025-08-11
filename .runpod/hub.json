@@ -1,0 +1,65 @@
+{
+  "title": "GigaPath (WSI)",
+  "description": "Deploy Microsoft's GigaPath foundation model for digital pathology on RunPod for inference or fine-tuning.",
+  "type": "serverless",
+  "category": "image",
+  "config": {
+    "runsOn": "GPU",
+    "containerDiskInGb": 40,
+    "gpuCount": 1,
+    "gpuIds": "NVIDIA A100 40GB PCIe,NVIDIA Tesla V100,NVIDIA T4",
+    "allowedCudaVersions": [
+      "12.3", "12.2", "12.1", "12.0"
+    ],
+    "presets": [
+      {
+        "name": "Inference (T4)",
+        "defaults": {
+          "MODE": "inference",
+          "MODEL_DIR": "/workspace/model",
+          "BATCH_SIZE": "8"
+        }
+      },
+      {
+        "name": "Fine-tune (A100)",
+        "defaults": {
+          "MODE": "train",
+          "MODEL_DIR": "/workspace/model",
+          "BATCH_SIZE": "64"
+        }
+      }
+    ],
+    "env": [
+      {
+        "key": "MODE",
+        "input": {
+          "name": "Mode",
+          "type": "select",
+          "options": ["inference", "train"],
+          "default": "inference"
+        }
+      },
+      {
+        "key": "MODEL_DIR",
+        "value": "/workspace/model"
+      },
+      {
+        "key": "CHECKPOINT_URL",
+        "input": {
+          "name": "Checkpoint URL",
+          "type": "string",
+          "description": "Optional: URL to pretrained weights",
+          "default": ""
+        }
+      },
+      {
+        "key": "BATCH_SIZE",
+        "input": {
+          "name": "Batch size",
+          "type": "number",
+          "default": 8
+        }
+      }
+    ]
+  }
+}
