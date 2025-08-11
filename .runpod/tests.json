@@ -1,18 +1,35 @@
 {
   "tests": [
     {
-      "name": "test_inference",
+      "name": "test_tile_encoder",
       "input": {
-        "image_url": "https://example.com/sample_wsi.tiff"
+        "image_url": "https://raw.githubusercontent.com/prov-gigapath/prov-gigapath/main/images/prov_normal_000_1.png",
+        "encoder_type": "tile"
       },
-      "timeout": 120000
+      "timeout": 180000
     }
   ],
   "config": {
-    "gpuTypeId": "NVIDIA T4",
+    "gpuTypeIds": [
+      "NVIDIA GeForce RTX 3090",
+      "NVIDIA GeForce RTX 4090", 
+      "NVIDIA RTX A4000",
+      "NVIDIA RTX A4500",
+      "NVIDIA RTX A5000",
+      "NVIDIA RTX A6000",
+      "NVIDIA A40",
+      "NVIDIA L4",
+      "NVIDIA L40",
+      "NVIDIA T4",
+      "NVIDIA A10",
+      "NVIDIA A100 PCIe"
+    ],
     "gpuCount": 1,
+    "containerDiskInGb": 50,
+    "volumeInGb": 20,
     "allowedCudaVersions": [
-      "12.3", "12.2", "12.1", "12.0"
-    ]
+      "12.3", "12.2", "12.1", "12.0", "11.8"
+    ],
+    "cloudType": "ALL"
   }
 }
