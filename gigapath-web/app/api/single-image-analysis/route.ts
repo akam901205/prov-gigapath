@@ -1,0 +1,61 @@
+import { NextRequest, NextResponse } from 'next/server'
+
+const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'http://localhost:8008'
+
+export async function POST(request: NextRequest) {
+  try {
+    const formData = await request.formData()
+    const image = formData.get('image') as File
+
+    if (!image) {
+      return NextResponse.json(
+        { error: 'No image provided' },
+        { status: 400 }
+      )
+    }
+
+    console.log(`Analyzing single image: ${image.name}`)
+
+    // Convert image to base64 for backend API
+    const imageBuffer = await image.arrayBuffer()
+    const imageBase64 = Buffer.from(imageBuffer).toString('base64')
+
+    // Create JSON payload as expected by fast_api.py
+    const requestPayload = {
+      input: {
+        image_base64: imageBase64,
+        encoder_type: "tile",
+        mode: "inference"
+      }
+    }
+
+    const response = await fetch(`${SINGLE_IMAGE_API_URL}/api/single-image-analysis`, {
+      method: 'POST',
+      body: JSON.stringify(requestPayload),
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Single image analysis error:', errorText)
+      return NextResponse.json(
+        { error: 'Analysis failed', details: errorText },
+        { status: response.status }
+      )
+    }
+
+    const analysisData = await response.json()
+    
+    console.log('Single image analysis completed successfully')
+    return NextResponse.json(analysisData)
+
+  } catch (error) {
+    console.error('Single image analysis proxy error:', error)
+    return NextResponse.json(
+      { error: 'Analysis failed', details: error.message },
+      { status: 500 }
+    )
+  }
+}
