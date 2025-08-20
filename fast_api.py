@@ -45,7 +45,7 @@ def load_model_on_demand():
     global TILE_ENCODER, TRANSFORM
     if TILE_ENCODER is None:
         print("Loading GigaPath model on-demand...")
-        # HF_TOKEN environment variable should be set externally
+        # HF_TOKEN should be set as environment variable on RunPod
         TILE_ENCODER = timm.create_model("hf_hub:prov-gigapath/prov-gigapath", pretrained=True)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         TILE_ENCODER = TILE_ENCODER.to(device)
@@ -67,7 +67,7 @@ def load_cache_on_demand():
         print("Loading cache on-demand...")
         
         # Use BACH 4-CLASS cache (BreakHis binary + BACH 4-class supervision)
-        bach_4class_path = "/workspace/embeddings_cache_BACH_4CLASS.pkl"
+        bach_4class_path = "/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl"
         if os.path.exists(bach_4class_path):
             print(f"🎯 Loading BACH 4-CLASS cache (optimized supervision)")
             with open(bach_4class_path, 'rb') as f:
@@ -391,6 +391,8 @@ def calculate_coordinate_based_predictions(new_umap, new_tsne, new_pca, coordina
         closest_distance_pooled = distances[closest_idx_pooled]
         closest_label_pooled = labels[closest_idx_pooled]
         
+        print(f"DEBUG {method_name}: new_coord={new_coord}, closest_idx={closest_idx_pooled}, closest_label={closest_label_pooled}, distance={closest_distance_pooled:.3f}")
+        
         # Find top 5 closest points for consensus
         top_5_indices = np.argsort(distances)[:5]
         top_5_labels = [labels[i] for i in top_5_indices]
@@ -598,9 +600,9 @@ async def single_image_analysis(request: AnalyzeRequest):
         cached_pca = coordinates['pca'].tolist()
         
         # New image position using dataset-aware projection (FIXED BACH UMAP ISSUE)
-        new_umap_combined = project_new_image_dataset_aware(l2_new_features, 'combined', 'umap', cache)
-        new_tsne_combined = project_new_image_dataset_aware(l2_new_features, 'combined', 'tsne', cache)
-        new_pca_combined = project_new_image_dataset_aware(l2_new_features, 'combined', 'pca', cache)
+        new_umap_combined = project_new_image_fixed(l2_new_features, "umap", cache)
+        new_tsne_combined = project_new_image_fixed(l2_new_features, "tsne", cache)
+        new_pca_combined = project_new_image_fixed(l2_new_features, "pca", cache)
         
         new_umap = list(new_umap_combined)
         new_tsne = list(new_tsne_combined) 
@@ -653,12 +655,12 @@ async def single_image_analysis(request: AnalyzeRequest):
             print(f"DEBUG: Error in dataset projection: {e}")
             # Fallback to simple projection
             top_5_indices = top_indices[:5]
-            new_breakhis_umap = (0, 0)  # Placeholder
-            new_breakhis_tsne = (0, 0)
-            new_breakhis_pca = (0, 0)
-            new_bach_umap = (0, 0)
-            new_bach_tsne = (0, 0)
-            new_bach_pca = (0, 0)
+            new_breakhis_umap = project_dataset_specific(l2_new_features, "breakhis", "umap", cache)
+            new_breakhis_tsne = project_dataset_specific(l2_new_features, "breakhis", "tsne", cache)
+            new_breakhis_pca = project_dataset_specific(l2_new_features, "breakhis", "pca", cache)
+            new_bach_umap = project_dataset_specific(l2_new_features, "bach", "umap", cache)
+            new_bach_tsne = project_dataset_specific(l2_new_features, "bach", "tsne", cache)
+            new_bach_pca = project_dataset_specific(l2_new_features, "bach", "pca", cache)
         
         return {
             "status": "success",
@@ -763,5 +765,196 @@ async def analyze_single_image_multipart(image: UploadFile = File(...)):
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
+def project_new_image_fixed(new_features: np.ndarray, method: str, cache: dict) -> tuple:
+    """
+    Fixed projection that uses the combined cache structure correctly.
+    """
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    # Get combined data
+    combined_data = cache["combined"]
+    cached_features = np.array(combined_data["features"])
+    cached_coords = np.array(combined_data["coordinates"][method])
+    cached_labels = combined_data["labels"]
+    
+    # Calculate similarities with all cached features
+    similarities = cosine_similarity([new_features], cached_features)[0]
+    
+    # Find top 5 most similar images
+    top_indices = np.argsort(similarities)[::-1][:5]
+    top_similarities = similarities[top_indices]
+    
+    # Normalize similarities to use as weights
+    weights = top_similarities / np.sum(top_similarities)
+    
+    # Get coordinates of top 5 similar images
+    top_coordinates = cached_coords[top_indices]
+    
+    # Calculate weighted average position
+    projected_x = np.average(top_coordinates[:, 0], weights=weights)
+    projected_y = np.average(top_coordinates[:, 1], weights=weights)
+    
+    # Debug output
+    print(f"DEBUG {method} projection:")
+    print(f"  Top 5 similar samples:")
+    for i, idx in enumerate(top_indices):
+        coord = cached_coords[idx]
+        label = cached_labels[idx]
+        sim = similarities[idx]
+        print(f"    {i+1}. [{coord[0]:.2f}, {coord[1]:.2f}] - {label} (sim: {sim:.3f})")
+    print(f"  Projected to: [{projected_x:.2f}, {projected_y:.2f}]")
+    
+    return (float(projected_x), float(projected_y))
+def project_dataset_specific(new_features, dataset_name, method, cache):
+    """
+    Project new image to dataset-specific coordinate space.
+    
+    Args:
+        new_features: L2 normalized GigaPath features (1536,)
+        dataset_name: breakhis or bach 
+        method: umap, tsne, or pca
+        cache: Combined cache with all data
+        
+    Returns:
+        (x, y) coordinates in dataset-specific space
+    """
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    # Get combined data
+    combined_data = cache["combined"]
+    all_features = np.array(combined_data["features"])
+    all_coords = np.array(combined_data["coordinates"][method])
+    all_labels = combined_data["labels"]
+    all_datasets = combined_data["datasets"]
+    
+    # Filter to dataset-specific samples
+    dataset_indices = [i for i, ds in enumerate(all_datasets) if ds == dataset_name]
+    
+    if not dataset_indices:
+        print(f"WARNING: No {dataset_name} samples found")
+        return (0.0, 0.0)
+    
+    dataset_features = all_features[dataset_indices]
+    dataset_coords = all_coords[dataset_indices]
+    dataset_labels = [all_labels[i] for i in dataset_indices]
+    
+    # Calculate similarities with dataset-specific features only
+    similarities = cosine_similarity([new_features], dataset_features)[0]
+    
+    # Find top 5 most similar within this dataset
+    top_indices = np.argsort(similarities)[::-1][:5]
+    top_similarities = similarities[top_indices]
+    
+    # Normalize similarities as weights
+    weights = top_similarities / np.sum(top_similarities)
+    
+    # Get coordinates of top 5 similar images in this dataset
+    top_coordinates = dataset_coords[top_indices]
+    
+    # Calculate weighted average position
+    projected_x = np.average(top_coordinates[:, 0], weights=weights)
+    projected_y = np.average(top_coordinates[:, 1], weights=weights)
+    
+    # Debug output
+    print(f"DEBUG {dataset_name} {method} projection:")
+    print(f"  Dataset samples: {len(dataset_indices)}")
+    print(f"  Top 5 similar in {dataset_name}:")
+    for i, idx in enumerate(top_indices):
+        coord = dataset_coords[idx]
+        label = dataset_labels[idx]
+        sim = similarities[idx]
+        print(f"    {i+1}. [{coord[0]:.2f}, {coord[1]:.2f}] - {label} (sim: {sim:.3f})")
+    print(f"  Projected to: [{projected_x:.2f}, {projected_y:.2f}]")
+    
+    return (float(projected_x), float(projected_y))
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8008)
+
+def project_cluster_aware(new_features, method, cache):
+    """
+    Cluster-aware projection that avoids averaging across different clusters.
+    
+    Strategy:
+    1. Find top similar samples
+    2. Group by biological cluster
+    3. Use the cluster with highest total similarity
+    4. Project within that cluster only
+    """
+    import numpy as np
+    from sklearn.metrics.pairwise import cosine_similarity
+    
+    combined_data = cache["combined"]
+    cached_features = np.array(combined_data["features"])
+    cached_coords = np.array(combined_data["coordinates"][method])
+    cached_labels = combined_data["labels"]
+    cached_datasets = combined_data["datasets"]
+    
+    # Map to biological clusters
+    biological_labels = []
+    for label, dataset in zip(cached_labels, cached_datasets):
+        if label == "normal" and dataset == "bach":
+            biological_labels.append("normal")
+        elif (label == "benign" and dataset == "bach") or (label == "benign" and dataset == "breakhis"):
+            biological_labels.append("benign")
+        elif label == "insitu" and dataset == "bach":
+            biological_labels.append("insitu")
+        elif (label == "invasive" and dataset == "bach") or (label == "malignant" and dataset == "breakhis"):
+            biological_labels.append("malignant")
+        else:
+            biological_labels.append("unknown")
+    
+    # Calculate similarities
+    similarities = cosine_similarity([new_features], cached_features)[0]
+    
+    # Get top 20 similar samples (larger pool)
+    top_indices = np.argsort(similarities)[::-1][:20]
+    
+    # Group by biological cluster
+    cluster_similarities = {"normal": [], "benign": [], "insitu": [], "malignant": []}
+    cluster_indices = {"normal": [], "benign": [], "insitu": [], "malignant": []}
+    
+    for idx in top_indices:
+        bio_label = biological_labels[idx]
+        if bio_label in cluster_similarities:
+            cluster_similarities[bio_label].append(similarities[idx])
+            cluster_indices[bio_label].append(idx)
+    
+    # Find cluster with highest total similarity
+    cluster_totals = {}
+    for cluster in cluster_similarities:
+        if cluster_similarities[cluster]:
+            cluster_totals[cluster] = sum(cluster_similarities[cluster])
+        else:
+            cluster_totals[cluster] = 0.0
+    
+    best_cluster = max(cluster_totals.items(), key=lambda x: x[1])[0]
+    
+    # Project within best cluster only
+    if cluster_indices[best_cluster]:
+        cluster_idx_list = cluster_indices[best_cluster][:5]  # Top 5 in best cluster
+        cluster_sims = [similarities[idx] for idx in cluster_idx_list]
+        cluster_coords = cached_coords[cluster_idx_list]
+        
+        # Weighted average within cluster
+        weights = np.array(cluster_sims) / sum(cluster_sims)
+        projected_x = np.average(cluster_coords[:, 0], weights=weights)
+        projected_y = np.average(cluster_coords[:, 1], weights=weights)
+        
+        # Enhanced debug output
+        print(f"DEBUG {method} CLUSTER-AWARE projection:")
+        print(f"  Cluster totals: {dict(sorted(cluster_totals.items(), key=lambda x: x[1], reverse=True))}")
+        print(f"  Best cluster: {best_cluster}")
+        print(f"  Top 5 in {best_cluster} cluster:")
+        for i, idx in enumerate(cluster_idx_list):
+            coord = cached_coords[idx]
+            label = cached_labels[idx]
+            dataset = cached_datasets[idx]
+            sim = similarities[idx]
+            print(f"    {i+1}. [{coord[0]:.2f}, {coord[1]:.2f}] - {label}_{dataset} (sim: {sim:.3f})")
+        print(f"  Projected to: [{projected_x:.2f}, {projected_y:.2f}] in {best_cluster} cluster")
+        
+        return (float(projected_x), float(projected_y))
+    else:
+        return (0.0, 0.0)
