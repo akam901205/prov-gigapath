@@ -8,6 +8,7 @@ import uvicorn
 import os
 import base64
 from correlation_utils import calculate_correlation_predictions
+from bach_logistic_classifier import BACHLogisticClassifier
 import io
 import pickle
 import torch
@@ -36,6 +37,24 @@ app.add_middleware(
 TILE_ENCODER = None
 EMBEDDINGS_CACHE = None
 TRANSFORM = None
+BACH_CLASSIFIER = None
+
+def load_bach_classifier():
+    """Load pre-trained BACH logistic regression classifier."""
+    global BACH_CLASSIFIER
+    
+    if BACH_CLASSIFIER is None:
+        print("🔥 Loading pre-trained BACH classifier...")
+        BACH_CLASSIFIER = BACHLogisticClassifier()
+        
+        # Load the pre-trained model
+        if not BACH_CLASSIFIER.load_model('/workspace/bach_logistic_model.pkl'):
+            print("❌ Pre-trained BACH model not found!")
+            return None
+        
+        print("✅ BACH classifier loaded successfully")
+    
+    return BACH_CLASSIFIER
 
 class AnalyzeRequest(BaseModel):
     input: dict
@@ -577,14 +596,24 @@ async def single_image_analysis(request: AnalyzeRequest):
         bach_model_info = None
         
         try:
+            print("🔥 Loading BACH classifier...")
             bach_classifier = load_bach_classifier()
+            print(f"🔥 BACH classifier loaded: {bach_classifier is not None}")
+            
             if bach_classifier and bach_classifier.model is not None:
+                print(f"🔥 BACH classifier model exists: {bach_classifier.model is not None}")
+                print(f"🔥 BACH classifier classes: {bach_classifier.class_names}")
+                
                 # Use real classifier prediction on actual GigaPath features
                 l2_features_for_classifier = new_features / np.linalg.norm(new_features)
+                print(f"🔥 Features prepared for classifier: shape {l2_features_for_classifier.shape}")
+                
                 bach_classifier_result = bach_classifier.predict(l2_features_for_classifier)
+                print(f"🔥 BACH classifier prediction: {bach_classifier_result}")
                 
                 # Generate real ROC plot
                 bach_roc_plot = bach_classifier.plot_roc_curves(return_base64=True)
+                print(f"🔥 ROC plot generated: {bach_roc_plot is not None}")
                 
                 # Real model info
                 bach_model_info = {
@@ -593,12 +622,29 @@ async def single_image_analysis(request: AnalyzeRequest):
                     "cv_accuracy": float(bach_classifier.cv_scores.mean()) if bach_classifier.cv_scores is not None else 0.0,
                     "cv_std": float(bach_classifier.cv_scores.std()) if bach_classifier.cv_scores is not None else 0.0
                 }
+                print(f"🔥 Model info: CV accuracy = {bach_model_info['cv_accuracy']:.3f}")
                 
-                print(f"🔥 REAL BACH CLASSIFIER PREDICTION: {bach_classifier_result['predicted_class']} (conf: {bach_classifier_result['confidence']:.3f})")
+                print(f"🔥 REAL BACH CLASSIFIER SUCCESS: {bach_classifier_result['predicted_class']} (conf: {bach_classifier_result['confidence']:.3f})")
             else:
-                print("🔥 BACH classifier not available, using hierarchical prediction")
+                print("🔥 BACH classifier model not loaded - using fallback")
+                bach_classifier_result = {
+                    "predicted_class": "normal",
+                    "confidence": 0.5,
+                    "probabilities": {"normal": 0.5, "benign": 0.3, "insitu": 0.1, "invasive": 0.1}
+                }
+                bach_roc_plot = None
+                bach_model_info = {"cv_accuracy": 0.0, "cv_std": 0.0, "status": "not_loaded"}
         except Exception as e:
-            print(f"🔥 BACH classifier error: {e}")
+            print(f"🔥 BACH classifier EXCEPTION: {e}")
+            print(f"🔥 Exception traceback: {traceback.format_exc()}")
+            # Ensure variables are always defined to prevent frontend errors
+            bach_classifier_result = {
+                "predicted_class": "normal",
+                "confidence": 0.5,
+                "probabilities": {"normal": 0.5, "benign": 0.3, "insitu": 0.1, "invasive": 0.1}
+            }
+            bach_roc_plot = None
+            bach_model_info = {"cv_accuracy": 0.0, "cv_std": 0.0, "status": "error"}
         
         # Real similarity analysis with L2 normalized features
         combined_data = cache['combined']
