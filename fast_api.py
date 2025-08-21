@@ -626,13 +626,109 @@ async def single_image_analysis(request: AnalyzeRequest):
             coordinates, cached_labels, cached_datasets
         )
         
-        # Simple prediction based on top matches
-        top_5_labels = [cached_labels[i] for i in top_indices[:5]]
-        malignant_count = sum(1 for label in top_5_labels if label in ['malignant', 'invasive'])
-        benign_count = sum(1 for label in top_5_labels if label in ['benign', 'normal'])
+        # REFINED HIERARCHICAL PREDICTION: Top-match based filtering
+        # Stage 1: BreakHis top match consensus using 3 methods
+        # Stage 2: Filtered BACH classification within relevant category only
         
-        final_prediction = "malignant" if malignant_count > benign_count else "benign"
-        confidence = max(similarities[top_indices[0]], 0.5)  # At least 50% confidence
+        # Get BreakHis and BACH indices
+        breakhis_indices = [i for i, ds in enumerate(cached_datasets) if ds == 'breakhis']
+        bach_indices = [i for i, ds in enumerate(cached_datasets) if ds == 'bach']
+        
+        if breakhis_indices and bach_indices:
+            # Stage 1: BreakHis top matching labels (not voting)
+            breakhis_features = [cached_features[i] for i in breakhis_indices]
+            breakhis_labels = [cached_labels[i] for i in breakhis_indices]
+            
+            # Method 1: Cosine similarity - get TOP MATCH
+            cosine_sims = cosine_similarity([l2_new_features], breakhis_features)[0]
+            similarity_top_label = breakhis_labels[np.argmax(cosine_sims)]
+            
+            # Method 2: Pearson correlation - get TOP MATCH
+            from scipy.stats import pearsonr
+            pearson_sims = []
+            for cached_feat in breakhis_features:
+                try:
+                    corr, _ = pearsonr(l2_new_features.flatten(), cached_feat.flatten())
+                    pearson_sims.append(corr if not np.isnan(corr) else -1.0)
+                except:
+                    pearson_sims.append(-1.0)
+            pearson_top_label = breakhis_labels[np.argmax(pearson_sims)]
+            
+            # Method 3: Spearman correlation - get TOP MATCH
+            from scipy.stats import spearmanr
+            spearman_sims = []
+            for cached_feat in breakhis_features:
+                try:
+                    corr, _ = spearmanr(l2_new_features.flatten(), cached_feat.flatten())
+                    spearman_sims.append(corr if not np.isnan(corr) else -1.0)
+                except:
+                    spearman_sims.append(-1.0)
+            spearman_top_label = breakhis_labels[np.argmax(spearman_sims)]
+            
+            # BreakHis consensus: majority of top matches
+            method_labels = [similarity_top_label, pearson_top_label, spearman_top_label]
+            malignant_votes = sum(1 for label in method_labels if label == 'malignant')
+            breakhis_consensus = 'malignant' if malignant_votes >= 2 else 'benign'
+            
+            # Stage 2: Filtered BACH classification
+            bach_features = [cached_features[i] for i in bach_indices]
+            bach_labels = [cached_labels[i] for i in bach_indices]
+            
+            # Filter BACH samples based on BreakHis consensus
+            if breakhis_consensus == 'malignant':
+                # Only consider invasive and insitu samples
+                relevant_indices = [i for i, label in enumerate(bach_labels) if label in ['invasive', 'insitu']]
+                target_labels = ['invasive', 'insitu']
+            else:
+                # Only consider normal and benign samples
+                relevant_indices = [i for i, label in enumerate(bach_labels) if label in ['normal', 'benign']]
+                target_labels = ['normal', 'benign']
+            
+            if relevant_indices:
+                # Calculate similarities only with filtered BACH samples
+                filtered_bach_features = [bach_features[i] for i in relevant_indices]
+                filtered_bach_labels = [bach_labels[i] for i in relevant_indices]
+                
+                filtered_sims = cosine_similarity([l2_new_features], filtered_bach_features)[0]
+                top_match_idx = np.argmax(filtered_sims)
+                
+                # Final prediction: most similar sample from filtered category
+                final_prediction = filtered_bach_labels[top_match_idx]
+                confidence = float(filtered_sims[top_match_idx])
+            else:
+                # Fallback if no relevant samples
+                final_prediction = 'normal' if breakhis_consensus == 'benign' else 'invasive'
+                confidence = 0.5
+            
+            confidence_level = "HIGH" if confidence > 0.7 else "MODERATE" if confidence > 0.5 else "LOW"
+            
+            # Build hierarchical details
+            hierarchical_details = {
+                'breakhis_consensus': breakhis_consensus,
+                'bach_subtype': final_prediction,
+                'confidence_level': confidence_level,
+                'agreement_status': 'STRONG' if malignant_votes == 3 or malignant_votes == 0 else 'MODERATE',
+                'classification_method': f'Filtered Hierarchical: BreakHis ({malignant_votes}/3 malignant) → BACH {target_labels}',
+                'method_breakdown': {
+                    'similarity': similarity_top_label,
+                    'pearson': pearson_top_label,
+                    'spearman': spearman_top_label
+                },
+                'filtered_category': target_labels,
+                'samples_considered': len(relevant_indices)
+            }
+            
+        else:
+            # Fallback if insufficient data
+            final_prediction = 'benign'
+            confidence = 0.5
+            hierarchical_details = {
+                'breakhis_consensus': 'benign',
+                'bach_subtype': 'benign', 
+                'confidence_level': 'LOW',
+                'agreement_status': 'WEAK',
+                'classification_method': 'Fallback: Insufficient training data'
+            }
         
         # SIMILARITY-BASED PREDICTIONS for diagnostic verdict
         similarity_predictions = calculate_similarity_based_predictions(
@@ -774,21 +870,26 @@ async def single_image_analysis(request: AnalyzeRequest):
                 "final_prediction": final_prediction,
                 "confidence": float(confidence),
                 "method_predictions": {
-                    "gigapath_similarity": final_prediction,
-                    "traditional_features": final_prediction,
+                    "similarity_consensus": hierarchical_details.get('method_breakdown', {}).get('similarity', similarity_consensus if 'similarity_consensus' in locals() else final_prediction),
+                    "pearson_correlation": hierarchical_details.get('method_breakdown', {}).get('pearson', pearson_consensus if 'pearson_consensus' in locals() else final_prediction),
+                    "spearman_correlation": hierarchical_details.get('method_breakdown', {}).get('spearman', spearman_consensus if 'spearman_consensus' in locals() else final_prediction),
                     "ensemble_final": final_prediction
                 },
                 "coordinate_predictions": coordinate_predictions,  # Coordinate-based predictions (UMAP/t-SNE/PCA)
                 "similarity_predictions": similarity_predictions,  # Similarity-based predictions (L2 normalized)
                 "correlation_predictions": correlation_predictions,  # Pearson and Spearman correlations
+                "hierarchical_details": hierarchical_details,  # Detailed hierarchical classification results
                 "vote_breakdown": {
-                    "malignant_votes": 2 if final_prediction == "malignant" else 0,
-                    "benign_votes": 2 if final_prediction == "benign" else 0
+                    "malignant_votes": hierarchical_details.get('malignant_votes', 2 if final_prediction == "malignant" else 0),
+                    "benign_votes": hierarchical_details.get('benign_votes', 2 if final_prediction == "benign" else 0)
                 },
                 "recommendation": f"Based on {confidence:.1%} confidence - {'High' if confidence > 0.8 else 'Moderate' if confidence > 0.6 else 'Low'} confidence prediction",
                 "summary": {
-                    "breakhis_consensus": final_prediction,
+                    "breakhis_consensus": hierarchical_details.get('breakhis_consensus', similarity_predictions.get('breakhis', {}).get('consensus', {}).get('label', 'benign')),
                     "bach_consensus": final_prediction,
+                    "confidence_level": hierarchical_details.get('confidence_level', "HIGH" if confidence > 0.8 else "MODERATE" if confidence > 0.6 else "LOW"),
+                    "agreement_status": hierarchical_details.get('agreement_status', "STRONG" if confidence > 0.8 else "MODERATE" if confidence > 0.6 else "WEAK"),
+                    "classification_method": hierarchical_details.get('classification_method', "Hierarchical: BreakHis → BACH subtype"),
                     "highest_similarity": float(max(similarities))
                 }
             },
