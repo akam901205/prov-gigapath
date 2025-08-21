@@ -35,6 +35,11 @@ interface AnalysisResult {
       confidence: number
       probabilities: { [key: string]: number }
     }
+    svm_rbf?: {
+      predicted_class: string
+      confidence: number
+      probabilities: { [key: string]: number }
+    }
     roc_plot_base64?: string
     model_info: {
       algorithm: string
@@ -564,6 +569,89 @@ export default function SingleImageAnalysisPage() {
                         </div>
                       </div>
                     </div>
+
+                    {/* SVM RBF Classifier */}
+                    {analysisResult?.gigapath_verdict?.svm_rbf && (
+                      <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl p-6 mb-6">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Brain className="w-8 h-8 text-green-600" />
+                            <div>
+                              <h4 className="text-xl font-bold text-gray-900">
+                                SVM RBF: {analysisResult.gigapath_verdict.svm_rbf.predicted_class?.toUpperCase() || 'PROCESSING'}
+                              </h4>
+                              <p className="text-green-600 font-medium">
+                                Support Vector Machine with RBF Kernel
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-green-600">
+                              {analysisResult.gigapath_verdict.svm_rbf.confidence ? (analysisResult.gigapath_verdict.svm_rbf.confidence * 100).toFixed(1) : '0.0'}%
+                            </div>
+                            <div className="text-sm text-gray-600">SVM Confidence</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* SVM Class Probabilities */}
+                    {analysisResult?.gigapath_verdict?.svm_rbf?.probabilities && (
+                      <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
+                        <h4 className="font-semibold mb-4">SVM RBF Class Probabilities</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {Object.entries(analysisResult.gigapath_verdict.svm_rbf.probabilities).map(([className, probability]) => (
+                            <div key={className} className="text-center">
+                              <div className={`text-lg font-bold ${
+                                className === 'normal' ? 'text-green-600' :
+                                className === 'benign' ? 'text-blue-600' :
+                                className === 'insitu' ? 'text-orange-600' :
+                                className === 'invasive' ? 'text-red-600' : 'text-gray-600'
+                              }`}>
+                                {(probability * 100).toFixed(1)}%
+                              </div>
+                              <div className="text-sm text-gray-600 capitalize">{className}</div>
+                              <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    className === 'normal' ? 'bg-green-600' :
+                                    className === 'benign' ? 'bg-blue-600' :
+                                    className === 'insitu' ? 'bg-orange-600' :
+                                    className === 'invasive' ? 'bg-red-600' : 'bg-gray-600'
+                                  }`}
+                                  style={{ width: `${probability * 100}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Classifier Comparison */}
+                    {analysisResult?.gigapath_verdict?.logistic_regression && analysisResult?.gigapath_verdict?.svm_rbf && (
+                      <div className="bg-gray-50 rounded-lg p-6 mb-6">
+                        <h4 className="font-semibold mb-4 text-center">Classifier Comparison</h4>
+                        <div className="grid grid-cols-2 gap-6">
+                          <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
+                            <h5 className="font-medium text-indigo-700 mb-2">Logistic Regression</h5>
+                            <div className="text-sm space-y-1">
+                              <div>Prediction: <span className="font-medium">{analysisResult.gigapath_verdict.logistic_regression.predicted_class}</span></div>
+                              <div>Confidence: <span className="font-medium">{(analysisResult.gigapath_verdict.logistic_regression.confidence * 100).toFixed(1)}%</span></div>
+                              <div className="text-xs text-gray-600">Linear decision boundaries</div>
+                            </div>
+                          </div>
+                          <div className="bg-green-50 rounded-lg p-4 border border-green-200">
+                            <h5 className="font-medium text-green-700 mb-2">SVM RBF</h5>
+                            <div className="text-sm space-y-1">
+                              <div>Prediction: <span className="font-medium">{analysisResult.gigapath_verdict.svm_rbf.predicted_class}</span></div>
+                              <div>Confidence: <span className="font-medium">{(analysisResult.gigapath_verdict.svm_rbf.confidence * 100).toFixed(1)}%</span></div>
+                              <div className="text-xs text-gray-600">Non-linear RBF kernel</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {/* ROC Curves */}
                     {analysisResult?.gigapath_verdict?.roc_plot_base64 && (

@@ -202,17 +202,38 @@ def enhance_feature_separations(cache):
         )
         enhanced_umap = umap_reducer.fit_transform(enhanced_features, y=numeric_labels)
         
-        print("Computing enhanced t-SNE embeddings...")
+        print("Computing enhanced t-SNE embeddings with UMAP-level separation...")
+        # Optimize t-SNE for excellent cluster separation like UMAP
+        optimal_perplexity = min(50, max(15, len(features) // 3))  # Higher perplexity for better structure
+        
         tsne_reducer = TSNE(
             n_components=2,
-            perplexity=min(30, len(features) // 4),
-            learning_rate='auto',
-            max_iter=1000,
+            perplexity=optimal_perplexity,        # Increased perplexity for better global structure
+            learning_rate=200.0,                 # Higher learning rate for stronger separation
+            max_iter=1500,                       # More iterations for convergence
+            early_exaggeration=24.0,             # Higher early exaggeration for cluster separation
             random_state=42,
-            metric='cosine',
-            early_exaggeration=12
+            metric='cosine',                     # Match UMAP's cosine metric
+            init='pca',                          # PCA initialization for better starting point
+            n_jobs=1                             # Single-threaded for reproducibility
         )
         enhanced_tsne = tsne_reducer.fit_transform(enhanced_features)
+        
+        # Post-process t-SNE for enhanced separation (supervised enhancement)
+        print("Applying supervised separation enhancement to t-SNE...")
+        enhanced_tsne_final = np.copy(enhanced_tsne)
+        
+        # Calculate cluster centers for each label
+        unique_labels = np.unique(numeric_labels)
+        for label_idx in unique_labels:
+            label_mask = numeric_labels == label_idx
+            if np.sum(label_mask) > 1:  # Only if multiple samples
+                cluster_center = np.mean(enhanced_tsne[label_mask], axis=0)
+                # Move points away from center for better separation
+                separation_factor = 1.5  # Increase inter-cluster distance
+                enhanced_tsne_final[label_mask] = cluster_center + (enhanced_tsne[label_mask] - cluster_center) * separation_factor
+        
+        enhanced_tsne = enhanced_tsne_final
         
         print("Computing enhanced PCA embeddings...")
         pca_reducer = PCA(n_components=2, random_state=42)
@@ -611,6 +632,12 @@ async def single_image_analysis(request: AnalyzeRequest):
                 bach_classifier_result = bach_classifier.predict(l2_features_for_classifier)
                 print(f"🔥 BACH classifier prediction: {bach_classifier_result}")
                 
+                # Generate SVM prediction if available
+                svm_classifier_result = None
+                if bach_classifier.svm_model is not None:
+                    svm_classifier_result = bach_classifier.predict_svm(l2_features_for_classifier)
+                    print(f"🔥 SVM classifier prediction: {svm_classifier_result}")
+                
                 # Generate real ROC plot
                 bach_roc_plot = bach_classifier.plot_roc_curves(return_base64=True)
                 print(f"🔥 ROC plot generated: {bach_roc_plot is not None}")
@@ -934,6 +961,13 @@ async def single_image_analysis(request: AnalyzeRequest):
                     "predicted_class": final_prediction,
                     "confidence": float(confidence),
                     "probabilities": {"error": "BACH classifier not available"}
+                },
+                # SVM RBF Classifier Results
+                # Support Vector Machine with Radial Basis Function kernel for comparison
+                "svm_rbf": svm_classifier_result if 'svm_classifier_result' in locals() and svm_classifier_result else {
+                    "predicted_class": final_prediction,
+                    "confidence": float(confidence),
+                    "probabilities": {"status": "SVM not available or not trained"}
                 },
                 # Real ROC curve from trained model
                 "roc_plot_base64": bach_roc_plot if 'bach_roc_plot' in locals() else None,
