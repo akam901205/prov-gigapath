@@ -29,6 +29,20 @@ interface AnalysisResult {
     cached_filenames: string[]
     closest_matches: Array<{ filename: string, label: string, similarity_score: number, distance: number, dataset: string }>
   }
+  gigapath_verdict?: {
+    logistic_regression: {
+      predicted_class: string
+      confidence: number
+      probabilities: { [key: string]: number }
+    }
+    roc_plot_base64?: string
+    model_info: {
+      algorithm: string
+      classes: string[]
+      cv_accuracy: number
+      cv_std: number
+    }
+  }
   verdict: {
     final_prediction: string
     confidence: number
@@ -38,6 +52,9 @@ interface AnalysisResult {
     summary: {
       breakhis_consensus: string
       bach_consensus: string
+      confidence_level: string
+      agreement_status: string
+      classification_method: string
       highest_similarity: number
     }
     coordinate_predictions?: {
@@ -525,28 +542,79 @@ export default function SingleImageAnalysisPage() {
                   <div>
                     <h3 className="text-2xl font-bold mb-4">GigaPath Foundation Model</h3>
                     
-                    {/* GigaPath Specific Analysis */}
+                    {/* Logistic Regression Prediction */}
                     <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 mb-6">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <Brain className="w-8 h-8 text-indigo-600" />
                           <div>
                             <h4 className="text-xl font-bold text-gray-900">
-                              GigaPath Analysis: {analysisResult?.gigapath_verdict?.prediction?.toUpperCase() || 'PROCESSING'}
+                              Logistic Regression: {analysisResult?.gigapath_verdict?.logistic_regression?.predicted_class?.toUpperCase() || 'PROCESSING'}
                             </h4>
                             <p className="text-indigo-600 font-medium">
-                              1.13B Parameter Foundation Model
+                              BACH 4-Class Classifier on GigaPath Features
                             </p>
                           </div>
                         </div>
                         <div className="text-right">
                           <div className="text-2xl font-bold text-indigo-600">
-                            {analysisResult?.gigapath_verdict?.confidence ? (analysisResult.gigapath_verdict.confidence * 100).toFixed(1) : '0.0'}%
+                            {analysisResult?.gigapath_verdict?.logistic_regression?.confidence ? (analysisResult.gigapath_verdict.logistic_regression.confidence * 100).toFixed(1) : '0.0'}%
                           </div>
-                          <div className="text-sm text-gray-600">Model Confidence</div>
+                          <div className="text-sm text-gray-600">Prediction Confidence</div>
                         </div>
                       </div>
                     </div>
+
+                    {/* ROC Curves */}
+                    {analysisResult?.gigapath_verdict?.roc_plot_base64 && (
+                      <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
+                        <h4 className="font-semibold mb-4 text-center">ROC Curves - BACH 4-Class Classification</h4>
+                        <div className="flex justify-center">
+                          <img 
+                            src={`data:image/png;base64,${analysisResult.gigapath_verdict.roc_plot_base64}`}
+                            alt="ROC Curves"
+                            className="max-w-full h-auto rounded-lg border"
+                          />
+                        </div>
+                        <div className="mt-4 text-center text-sm text-gray-600">
+                          <p>Cross-Validation Accuracy: {analysisResult?.gigapath_verdict?.model_info?.cv_accuracy ? (analysisResult.gigapath_verdict.model_info.cv_accuracy * 100).toFixed(1) : '0.0'}% 
+                          ± {analysisResult?.gigapath_verdict?.model_info?.cv_std ? (analysisResult.gigapath_verdict.model_info.cv_std * 100).toFixed(1) : '0.0'}%</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Class Probabilities */}
+                    {analysisResult?.gigapath_verdict?.logistic_regression?.probabilities && (
+                      <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
+                        <h4 className="font-semibold mb-4">Class Probabilities</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {Object.entries(analysisResult.gigapath_verdict.logistic_regression.probabilities).map(([className, probability]) => (
+                            <div key={className} className="text-center">
+                              <div className={`text-lg font-bold ${
+                                className === 'normal' ? 'text-green-600' :
+                                className === 'benign' ? 'text-blue-600' :
+                                className === 'insitu' ? 'text-orange-600' :
+                                className === 'invasive' ? 'text-red-600' : 'text-gray-600'
+                              }`}>
+                                {(probability * 100).toFixed(1)}%
+                              </div>
+                              <div className="text-sm text-gray-600 capitalize">{className}</div>
+                              <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    className === 'normal' ? 'bg-green-600' :
+                                    className === 'benign' ? 'bg-blue-600' :
+                                    className === 'insitu' ? 'bg-orange-600' :
+                                    className === 'invasive' ? 'bg-red-600' : 'bg-gray-600'
+                                  }`}
+                                  style={{ width: `${probability * 100}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* GigaPath Feature Analysis */}
                     <div className="grid md:grid-cols-2 gap-6 mb-6">
@@ -608,20 +676,131 @@ export default function SingleImageAnalysisPage() {
                           <h4 className="text-xl font-bold text-gray-800 mb-2">Final Prediction</h4>
                           <div className="flex items-center gap-3">
                             {getConfidenceIcon(analysisResult.verdict.confidence)}
-                            <span className={`text-2xl font-bold ${
-                              analysisResult.verdict.final_prediction === 'malignant' ? 'text-red-600' : 'text-blue-600'
+                            <span className={`text-3xl font-bold ${
+                              analysisResult.verdict.final_prediction === 'malignant' ? 'text-red-600' : 
+                              analysisResult.verdict.final_prediction === 'invasive' ? 'text-purple-600' :
+                              analysisResult.verdict.final_prediction === 'insitu' ? 'text-orange-600' :
+                              analysisResult.verdict.final_prediction === 'normal' ? 'text-green-600' : 'text-blue-600'
                             }`}>
                               {analysisResult.verdict.final_prediction.toUpperCase()}
                             </span>
-                            <span className={`text-lg ${getConfidenceColor(analysisResult.verdict.confidence)}`}>
-                              ({(analysisResult.verdict.confidence * 100).toFixed(1)}% confidence)
-                            </span>
+                            <div className="flex flex-col">
+                              <span className={`text-lg font-semibold ${
+                                (analysisResult?.verdict?.summary?.confidence_level === 'HIGH' || 
+                                 analysisResult?.verdict?.hierarchical_details?.confidence_level === 'HIGH' ||
+                                 (analysisResult?.verdict?.recommendation && analysisResult.verdict.recommendation.includes('HIGH'))) ? 'text-green-600' : 'text-yellow-600'
+                              }`}>
+                                {analysisResult?.verdict?.summary?.confidence_level || 
+                                 analysisResult?.verdict?.hierarchical_details?.confidence_level ||
+                                 (analysisResult?.verdict?.recommendation?.includes('HIGH') ? 'HIGH' : 
+                                  analysisResult?.verdict?.recommendation?.includes('LOW') ? 'LOW' : 'UNKNOWN')} CONFIDENCE
+                              </span>
+                              <span className="text-sm text-gray-600">
+                                ({(analysisResult.verdict.confidence * 100).toFixed(1)}%)
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className="text-sm text-gray-600">Recommendation</div>
+                          <div className="text-sm text-gray-600">Decision Rule</div>
                           <div className="text-sm font-medium text-gray-800 max-w-md">
-                            {analysisResult?.verdict?.recommendation || 'further_analysis'}
+                            {analysisResult?.verdict?.recommendation || 'Consensus-based classification'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Consensus Decision Flow */}
+                    <div className="mb-6">
+                      <h4 className="text-lg font-semibold mb-4">🎯 Consensus Decision Flow</h4>
+                      <div className="bg-white rounded-lg p-6 shadow-sm border">
+                        
+                        {/* Step 1: BreakHis Consensus */}
+                        <div className="mb-6">
+                          <h5 className="font-medium mb-3 flex items-center gap-2">
+                            <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-sm">Step 1</span>
+                            BreakHis Consensus (Malignant vs Benign)
+                          </h5>
+                          <div className="grid grid-cols-3 gap-4 mb-3">
+                            <div className="bg-gray-50 rounded p-3 text-center">
+                              <div className="text-xs text-gray-600">Similarity</div>
+                              <div className={`font-semibold ${
+                                analysisResult?.verdict?.method_predictions?.similarity_consensus === 'malignant' ? 'text-red-600' : 'text-blue-600'
+                              }`}>
+                                {analysisResult?.verdict?.method_predictions?.similarity_consensus?.toUpperCase() || 'N/A'}
+                              </div>
+                            </div>
+                            <div className="bg-gray-50 rounded p-3 text-center">
+                              <div className="text-xs text-gray-600">Pearson</div>
+                              <div className={`font-semibold ${
+                                analysisResult?.verdict?.method_predictions?.pearson_correlation === 'malignant' ? 'text-red-600' : 'text-blue-600'
+                              }`}>
+                                {analysisResult?.verdict?.method_predictions?.pearson_correlation?.toUpperCase() || 'N/A'}
+                              </div>
+                            </div>
+                            <div className="bg-gray-50 rounded p-3 text-center">
+                              <div className="text-xs text-gray-600">Spearman</div>
+                              <div className={`font-semibold ${
+                                analysisResult?.verdict?.method_predictions?.spearman_correlation === 'malignant' ? 'text-red-600' : 'text-blue-600'
+                              }`}>
+                                {analysisResult?.verdict?.method_predictions?.spearman_correlation?.toUpperCase() || 'N/A'}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-center">
+                            <span className="text-lg">→</span>
+                            <div className="mx-3 bg-purple-50 border-2 border-purple-200 rounded-lg px-4 py-2">
+                              <div className="text-xs text-purple-600">BreakHis Consensus</div>
+                              <div className={`font-bold text-lg ${
+                                analysisResult?.verdict?.summary?.breakhis_consensus === 'malignant' ? 'text-red-600' : 'text-blue-600'
+                              }`}>
+                                {analysisResult?.verdict?.summary?.breakhis_consensus?.toUpperCase() || 'UNKNOWN'}
+                              </div>
+                              <div className="text-xs text-gray-600">
+                                {analysisResult?.verdict?.summary?.agreement_status || ''}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Step 2: BACH Subtype */}
+                        <div className="border-t pt-4">
+                          <h5 className="font-medium mb-3 flex items-center gap-2">
+                            <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-sm">Step 2</span>
+                            BACH Subtype Classification
+                          </h5>
+                          <div className="text-sm text-gray-600 mb-3">
+                            {analysisResult?.verdict?.summary?.breakhis_consensus === 'malignant' 
+                              ? 'Malignant → Check: Invasive vs In Situ'
+                              : 'Benign → Check: Normal vs Benign'
+                            }
+                          </div>
+                          <div className="flex items-center justify-center">
+                            <div className="bg-green-50 border-2 border-green-200 rounded-lg px-4 py-2">
+                              <div className="text-xs text-green-600">BACH Consensus</div>
+                              <div className={`font-bold text-lg ${
+                                (analysisResult?.verdict?.summary?.bach_consensus === 'malignant' || analysisResult.verdict.final_prediction === 'malignant') ? 'text-red-600' :
+                                (analysisResult?.verdict?.summary?.bach_consensus === 'invasive' || analysisResult.verdict.final_prediction === 'invasive') ? 'text-purple-600' :
+                                (analysisResult?.verdict?.summary?.bach_consensus === 'insitu' || analysisResult.verdict.final_prediction === 'insitu') ? 'text-orange-600' :
+                                (analysisResult?.verdict?.summary?.bach_consensus === 'normal' || analysisResult.verdict.final_prediction === 'normal') ? 'text-green-600' : 'text-blue-600'
+                              }`}>
+                                {(analysisResult?.verdict?.summary?.bach_consensus || 
+                                  analysisResult?.verdict?.summary?.bach_subtype ||
+                                  analysisResult.verdict.final_prediction)?.toUpperCase() || 'UNKNOWN'}
+                              </div>
+                            </div>
+                            <span className="mx-3 text-lg">→</span>
+                            <div className="bg-orange-50 border-2 border-orange-200 rounded-lg px-4 py-2">
+                              <div className="text-xs text-orange-600">Final Result</div>
+                              <div className={`font-bold text-xl ${
+                                analysisResult.verdict.final_prediction === 'malignant' ? 'text-red-600' :
+                                analysisResult.verdict.final_prediction === 'invasive' ? 'text-purple-600' :
+                                analysisResult.verdict.final_prediction === 'insitu' ? 'text-orange-600' :
+                                analysisResult.verdict.final_prediction === 'normal' ? 'text-green-600' : 'text-blue-600'
+                              }`}>
+                                {analysisResult.verdict.final_prediction.toUpperCase()}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -649,26 +828,57 @@ export default function SingleImageAnalysisPage() {
                         </div>
                       </div>
 
-                      {/* Vote Breakdown */}
+                      {/* Consensus Details */}
                       <div className="bg-white rounded-lg p-6 shadow-sm border">
-                        <h4 className="font-semibold mb-3">Vote Summary</h4>
+                        <h4 className="font-semibold mb-3">Consensus Analysis</h4>
                         <div className="space-y-3">
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600">Malignant votes</span>
-                            <span className="font-bold text-red-600">{analysisResult?.verdict?.vote_breakdown?.malignant_votes || 0}</span>
+                            <span className="text-sm text-gray-600">BreakHis consensus</span>
+                            <span className={`font-semibold ${
+                              analysisResult?.verdict?.summary?.breakhis_consensus === 'malignant' ? 'text-red-600' : 'text-blue-600'
+                            }`}>
+                              {analysisResult?.verdict?.summary?.breakhis_consensus?.toUpperCase() || 'UNKNOWN'}
+                            </span>
                           </div>
                           <div className="flex justify-between items-center">
-                            <span className="text-sm text-gray-600">Benign votes</span>
-                            <span className="font-bold text-blue-600">{analysisResult?.verdict?.vote_breakdown?.benign_votes || 0}</span>
+                            <span className="text-sm text-gray-600">BACH consensus</span>
+                            <span className={`font-semibold ${
+                              (analysisResult?.verdict?.summary?.bach_consensus === 'malignant' || analysisResult.verdict.final_prediction === 'malignant') ? 'text-red-600' :
+                              (analysisResult?.verdict?.summary?.bach_consensus === 'invasive' || analysisResult.verdict.final_prediction === 'invasive') ? 'text-purple-600' :
+                              (analysisResult?.verdict?.summary?.bach_consensus === 'insitu' || analysisResult.verdict.final_prediction === 'insitu') ? 'text-orange-600' :
+                              (analysisResult?.verdict?.summary?.bach_consensus === 'normal' || analysisResult.verdict.final_prediction === 'normal') ? 'text-green-600' : 'text-blue-600'
+                            }`}>
+                              {(analysisResult?.verdict?.summary?.bach_consensus || 
+                                analysisResult?.verdict?.summary?.bach_subtype ||
+                                analysisResult.verdict.final_prediction)?.toUpperCase() || 'UNKNOWN'}
+                            </span>
                           </div>
                           <div className="border-t pt-3 space-y-2">
                             <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600">BreakHis consensus</span>
-                              <span className="font-medium">{analysisResult?.verdict?.summary?.breakhis_consensus || 'unknown'}</span>
+                              <span className="text-sm text-gray-600">Confidence level</span>
+                              <span className={`font-bold ${
+                                (analysisResult?.verdict?.summary?.confidence_level === 'HIGH' || 
+                                 analysisResult?.verdict?.hierarchical_details?.confidence_level === 'HIGH' ||
+                                 (analysisResult?.verdict?.recommendation && analysisResult.verdict.recommendation.includes('HIGH'))) ? 'text-green-600' : 'text-yellow-600'
+                              }`}>
+                                {analysisResult?.verdict?.summary?.confidence_level || 
+                                 analysisResult?.verdict?.hierarchical_details?.confidence_level ||
+                                 (analysisResult?.verdict?.recommendation?.includes('HIGH') ? 'HIGH' : 
+                                  analysisResult?.verdict?.recommendation?.includes('LOW') ? 'LOW' : 'UNKNOWN')}
+                              </span>
                             </div>
                             <div className="flex justify-between items-center">
-                              <span className="text-sm text-gray-600">BACH consensus</span>
-                              <span className="font-medium">{analysisResult?.verdict?.summary?.bach_consensus || 'unknown'}</span>
+                              <span className="text-sm text-gray-600">Agreement status</span>
+                              <span className="font-medium text-gray-700">
+                                {analysisResult?.verdict?.summary?.agreement_status || 
+                                 analysisResult?.verdict?.hierarchical_details?.agreement_status || 'N/A'}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className="text-sm text-gray-600">Method</span>
+                              <span className="font-medium text-gray-700">
+                                {analysisResult?.verdict?.summary?.classification_method || 'Consensus'}
+                              </span>
                             </div>
                             <div className="flex justify-between items-center">
                               <span className="text-sm text-gray-600">Highest similarity</span>

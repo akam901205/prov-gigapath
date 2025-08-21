@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'http://localhost:8008'
+const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'https://8v9wob2mln55to-8008.proxy.runpod.net'
 
 export async function POST(request: NextRequest) {
   try {
@@ -49,6 +49,11 @@ export async function POST(request: NextRequest) {
     const analysisData = await response.json()
     
     console.log('Single image analysis completed successfully')
+    console.log('Backend response keys:', Object.keys(analysisData))
+    console.log('Has gigapath_verdict:', 'gigapath_verdict' in analysisData)
+    if (analysisData.gigapath_verdict) {
+      console.log('GigaPath verdict keys:', Object.keys(analysisData.gigapath_verdict))
+    }
     return NextResponse.json(analysisData)
 
   } catch (error) {
