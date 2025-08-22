@@ -648,14 +648,18 @@ async def single_image_analysis(request: AnalyzeRequest):
                 bach_roc_plot = bach_classifier.plot_roc_curves(return_base64=True)
                 print(f"🔥 ROC plot generated: {bach_roc_plot is not None}")
                 
-                # Real model info
+                # Real model info with HONEST test performance
                 bach_model_info = {
-                    "algorithm": "Logistic Regression (One-vs-Rest)",
+                    "algorithm": "Dual Classifier (Logistic Regression + SVM RBF)",
                     "classes": bach_classifier.class_names,
-                    "cv_accuracy": float(bach_classifier.cv_scores.mean()) if bach_classifier.cv_scores is not None else 0.0,
-                    "cv_std": float(bach_classifier.cv_scores.std()) if bach_classifier.cv_scores is not None else 0.0
+                    "test_accuracy_lr": float(bach_classifier.test_scores['accuracy']) if bach_classifier.test_scores else 0.0,
+                    "test_accuracy_svm": float(bach_classifier.svm_test_scores['accuracy']) if bach_classifier.svm_test_scores else 0.0,
+                    "test_roc_auc_lr": float(bach_classifier.test_roc_data['roc_auc']['micro']) if bach_classifier.test_roc_data else 0.0,
+                    "test_roc_auc_svm": float(bach_classifier.svm_test_roc_data['roc_auc']['micro']) if bach_classifier.svm_test_roc_data else 0.0,
+                    "data_splits": bach_classifier.data_splits,
+                    "evaluation_type": "HELD_OUT_TEST_SET"
                 }
-                print(f"🔥 Model info: CV accuracy = {bach_model_info['cv_accuracy']:.3f}")
+                print(f"🔥 Model info: LR Test accuracy = {bach_model_info['test_accuracy_lr']:.3f}, SVM Test accuracy = {bach_model_info['test_accuracy_svm']:.3f}")
                 
                 print(f"🔥 REAL BACH CLASSIFIER SUCCESS: {bach_classifier_result['predicted_class']} (conf: {bach_classifier_result['confidence']:.3f})")
             else:
