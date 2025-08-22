@@ -9,6 +9,7 @@ import os
 import base64
 from correlation_utils import calculate_correlation_predictions
 from bach_logistic_classifier import BACHLogisticClassifier
+from breakhis_binary_classifier import BreakHisBinaryClassifier
 import io
 import pickle
 import torch
@@ -38,6 +39,7 @@ TILE_ENCODER = None
 EMBEDDINGS_CACHE = None
 TRANSFORM = None
 BACH_CLASSIFIER = None
+BREAKHIS_CLASSIFIER = None
 
 def load_bach_classifier():
     """Load pre-trained BACH logistic regression classifier."""
@@ -55,6 +57,23 @@ def load_bach_classifier():
         print("✅ BACH classifier loaded successfully")
     
     return BACH_CLASSIFIER
+
+def load_breakhis_classifier():
+    """Load pre-trained BreakHis binary classifier."""
+    global BREAKHIS_CLASSIFIER
+    
+    if BREAKHIS_CLASSIFIER is None:
+        print("🔥 Loading pre-trained BreakHis binary classifier...")
+        BREAKHIS_CLASSIFIER = BreakHisBinaryClassifier()
+        
+        # Load the pre-trained model
+        if not BREAKHIS_CLASSIFIER.load_model('/workspace/breakhis_binary_model.pkl'):
+            print("❌ Pre-trained BreakHis model not found!")
+            return None
+        
+        print("✅ BreakHis binary classifier loaded successfully")
+    
+    return BREAKHIS_CLASSIFIER
 
 class AnalyzeRequest(BaseModel):
     input: dict
@@ -616,6 +635,13 @@ async def single_image_analysis(request: AnalyzeRequest):
         bach_roc_plot = None
         bach_model_info = None
         
+        # REAL BREAKHIS BINARY CLASSIFIER
+        # Load and use the actual trained BreakHis binary classifier
+        breakhis_lr_result = None
+        breakhis_svm_result = None
+        breakhis_roc_plot = None
+        breakhis_model_info = None
+        
         try:
             print("🔥 Loading BACH classifier...")
             bach_classifier = load_bach_classifier()
@@ -682,6 +708,48 @@ async def single_image_analysis(request: AnalyzeRequest):
             }
             bach_roc_plot = None
             bach_model_info = {"cv_accuracy": 0.0, "cv_std": 0.0, "status": "error"}
+        
+        # BREAKHIS BINARY CLASSIFIER EXECUTION
+        try:
+            print("🔥 Loading BreakHis binary classifier...")
+            breakhis_classifier = load_breakhis_classifier()
+            print(f"🔥 BreakHis classifier loaded: {breakhis_classifier is not None}")
+            
+            if breakhis_classifier and breakhis_classifier.lr_model is not None:
+                print("🔥 Executing BreakHis binary classification...")
+                
+                # Logistic Regression prediction
+                breakhis_lr_result = breakhis_classifier.predict_lr(l2_features_for_classifier)
+                print(f"🔥 BreakHis LR prediction: {breakhis_lr_result}")
+                
+                # SVM prediction  
+                if breakhis_classifier.svm_model is not None:
+                    breakhis_svm_result = breakhis_classifier.predict_svm(l2_features_for_classifier)
+                    print(f"🔥 BreakHis SVM prediction: {breakhis_svm_result}")
+                
+                # Generate BreakHis ROC plot
+                breakhis_roc_plot = breakhis_classifier.plot_roc_curves(return_base64=True)
+                print(f"🔥 BreakHis ROC plot generated: {breakhis_roc_plot is not None}")
+                
+                # BreakHis model info
+                breakhis_model_info = {
+                    "algorithm": "Binary Classification (LR + SVM RBF)",
+                    "classes": breakhis_classifier.class_names,
+                    "test_accuracy_lr": float(breakhis_classifier.test_scores_lr['accuracy']) if breakhis_classifier.test_scores_lr else 0.0,
+                    "test_accuracy_svm": float(breakhis_classifier.test_scores_svm['accuracy']) if breakhis_classifier.test_scores_svm else 0.0,
+                    "test_roc_auc_lr": float(breakhis_classifier.test_roc_data_lr['roc_auc']) if breakhis_classifier.test_roc_data_lr else 0.0,
+                    "test_roc_auc_svm": float(breakhis_classifier.test_roc_data_svm['roc_auc']) if breakhis_classifier.test_roc_data_svm else 0.0,
+                    "data_splits": breakhis_classifier.data_splits,
+                    "evaluation_type": "HELD_OUT_TEST_SET",
+                    "dataset": "BreakHis"
+                }
+                
+                print(f"🔥 BreakHis SUCCESS: LR={breakhis_lr_result['predicted_class']} ({breakhis_lr_result['confidence']:.3f}), SVM={breakhis_svm_result['predicted_class'] if breakhis_svm_result else 'N/A'}")
+            else:
+                print("🔥 BreakHis classifier not available")
+        except Exception as e:
+            print(f"🔥 BreakHis classifier error: {e}")
+            print(f"🔥 BreakHis exception traceback: {traceback.format_exc()}")
         
         # Real similarity analysis with L2 normalized features
         combined_data = cache['combined']
@@ -984,6 +1052,30 @@ async def single_image_analysis(request: AnalyzeRequest):
                         "invasive": 0.25
                     },
                     "status": "SVM not trained - showing uniform distribution"
+                },
+                # BreakHis Binary Classification Results
+                # Malignant vs Non-malignant classification trained on BreakHis dataset
+                "breakhis_binary": {
+                    "logistic_regression": breakhis_lr_result if breakhis_lr_result else {
+                        "predicted_class": "benign",
+                        "confidence": 0.5,
+                        "probabilities": {"benign": 0.5, "malignant": 0.5},
+                        "status": "BreakHis LR not available"
+                    },
+                    "svm_rbf": breakhis_svm_result if breakhis_svm_result else {
+                        "predicted_class": "benign", 
+                        "confidence": 0.5,
+                        "probabilities": {"benign": 0.5, "malignant": 0.5},
+                        "status": "BreakHis SVM not available"
+                    },
+                    "roc_plot_base64": breakhis_roc_plot if breakhis_roc_plot else None,
+                    "model_info": breakhis_model_info if breakhis_model_info else {
+                        "algorithm": "Binary Classification (LR + SVM RBF)",
+                        "classes": ["benign", "malignant"],
+                        "test_accuracy_lr": 0.0,
+                        "test_accuracy_svm": 0.0,
+                        "status": "Model not loaded"
+                    }
                 },
                 # Real ROC curve from trained model
                 "roc_plot_base64": bach_roc_plot if 'bach_roc_plot' in locals() else None,
