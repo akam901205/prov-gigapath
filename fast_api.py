@@ -635,8 +635,14 @@ async def single_image_analysis(request: AnalyzeRequest):
                 # Generate SVM prediction if available
                 svm_classifier_result = None
                 if bach_classifier.svm_model is not None:
-                    svm_classifier_result = bach_classifier.predict_svm(l2_features_for_classifier)
-                    print(f"🔥 SVM classifier prediction: {svm_classifier_result}")
+                    try:
+                        svm_classifier_result = bach_classifier.predict_svm(l2_features_for_classifier)
+                        print(f"🔥 SVM classifier prediction: {svm_classifier_result}")
+                    except Exception as svm_error:
+                        print(f"🔥 SVM prediction error: {svm_error}")
+                        svm_classifier_result = None
+                else:
+                    print("🔥 SVM model not available in loaded classifier")
                 
                 # Generate real ROC plot
                 bach_roc_plot = bach_classifier.plot_roc_curves(return_base64=True)
@@ -967,7 +973,13 @@ async def single_image_analysis(request: AnalyzeRequest):
                 "svm_rbf": svm_classifier_result if 'svm_classifier_result' in locals() and svm_classifier_result else {
                     "predicted_class": final_prediction,
                     "confidence": float(confidence),
-                    "probabilities": {"status": "SVM not available or not trained"}
+                    "probabilities": {
+                        "normal": 0.25,
+                        "benign": 0.25, 
+                        "insitu": 0.25,
+                        "invasive": 0.25
+                    },
+                    "status": "SVM not trained - showing uniform distribution"
                 },
                 # Real ROC curve from trained model
                 "roc_plot_base64": bach_roc_plot if 'bach_roc_plot' in locals() else None,
