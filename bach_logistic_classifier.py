@@ -19,7 +19,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 class BACHLogisticClassifier:
-    def __init__(self, cache_file='/workspace/embeddings_cache_REAL_GIGAPATH.pkl'):
+    def __init__(self, cache_file='/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl'):
         self.cache_file = cache_file
         self.model = None
         self.svm_model = None

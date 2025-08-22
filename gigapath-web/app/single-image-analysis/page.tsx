@@ -40,6 +40,25 @@ interface AnalysisResult {
       confidence: number
       probabilities: { [key: string]: number }
     }
+    breakhis_binary?: {
+      logistic_regression: {
+        predicted_class: string
+        confidence: number
+        probabilities: { [key: string]: number }
+      }
+      svm_rbf: {
+        predicted_class: string
+        confidence: number
+        probabilities: { [key: string]: number }
+      }
+      roc_plot_base64?: string
+      model_info: {
+        algorithm: string
+        classes: string[]
+        test_accuracy_lr: number
+        test_accuracy_svm: number
+      }
+    }
     roc_plot_base64?: string
     model_info: {
       algorithm: string
@@ -648,6 +667,82 @@ export default function SingleImageAnalysisPage() {
                               <div>Confidence: <span className="font-medium">{(analysisResult.gigapath_verdict.svm_rbf.confidence * 100).toFixed(1)}%</span></div>
                               <div className="text-xs text-gray-600">Non-linear RBF kernel</div>
                             </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* BreakHis Binary Classification */}
+                    {analysisResult?.gigapath_verdict?.breakhis_binary && (
+                      <div className="bg-gray-50 rounded-lg p-6 mb-6">
+                        <h4 className="font-semibold mb-4 text-center text-gray-700">BreakHis Binary Classification (Malignant vs Benign)</h4>
+                        <p className="text-sm text-center text-gray-600 mb-4">Trained on 1,817 BreakHis samples with honest test evaluation</p>
+                        
+                        <div className="grid grid-cols-2 gap-6">
+                          {/* BreakHis Logistic Regression */}
+                          <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                            <h5 className="font-medium text-blue-700 mb-3">BreakHis Logistic Regression</h5>
+                            <div className="text-sm space-y-2">
+                              <div className="flex justify-between">
+                                <span>Prediction:</span>
+                                <span className={`font-medium ${
+                                  analysisResult.gigapath_verdict.breakhis_binary.logistic_regression.predicted_class === 'malignant' ? 'text-red-600' : 'text-green-600'
+                                }`}>
+                                  {analysisResult.gigapath_verdict.breakhis_binary.logistic_regression.predicted_class?.toUpperCase()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Confidence:</span>
+                                <span className="font-medium">{(analysisResult.gigapath_verdict.breakhis_binary.logistic_regression.confidence * 100).toFixed(1)}%</span>
+                              </div>
+                              <div className="text-xs text-gray-600 mt-2">
+                                Test Accuracy: {analysisResult.gigapath_verdict.breakhis_binary.model_info?.test_accuracy_lr ? (analysisResult.gigapath_verdict.breakhis_binary.model_info.test_accuracy_lr * 100).toFixed(1) : 'N/A'}%
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* BreakHis SVM RBF */}
+                          <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                            <h5 className="font-medium text-purple-700 mb-3">BreakHis SVM RBF</h5>
+                            <div className="text-sm space-y-2">
+                              <div className="flex justify-between">
+                                <span>Prediction:</span>
+                                <span className={`font-medium ${
+                                  analysisResult.gigapath_verdict.breakhis_binary.svm_rbf.predicted_class === 'malignant' ? 'text-red-600' : 'text-green-600'
+                                }`}>
+                                  {analysisResult.gigapath_verdict.breakhis_binary.svm_rbf.predicted_class?.toUpperCase()}
+                                </span>
+                              </div>
+                              <div className="flex justify-between">
+                                <span>Confidence:</span>
+                                <span className="font-medium">{(analysisResult.gigapath_verdict.breakhis_binary.svm_rbf.confidence * 100).toFixed(1)}%</span>
+                              </div>
+                              <div className="text-xs text-gray-600 mt-2">
+                                Test Accuracy: {analysisResult.gigapath_verdict.breakhis_binary.model_info?.test_accuracy_svm ? (analysisResult.gigapath_verdict.breakhis_binary.model_info.test_accuracy_svm * 100).toFixed(1) : 'N/A'}%
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* BreakHis Binary Probabilities */}
+                        <div className="mt-4 bg-white rounded-lg p-4 border">
+                          <h5 className="font-medium mb-3">Binary Classification Probabilities</h5>
+                          <div className="grid grid-cols-2 gap-4">
+                            {Object.entries(analysisResult.gigapath_verdict.breakhis_binary.logistic_regression.probabilities || {}).map(([className, probability]) => (
+                              <div key={className} className="text-center">
+                                <div className="text-sm text-gray-600 mb-1 capitalize">{className}</div>
+                                <div className="flex justify-between text-xs">
+                                  <span>LR: {(probability * 100).toFixed(1)}%</span>
+                                  <span>SVM: {((analysisResult.gigapath_verdict.breakhis_binary.svm_rbf.probabilities?.[className] || 0) * 100).toFixed(1)}%</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                  <div 
+                                    className={`h-2 rounded-full ${className === 'malignant' ? 'bg-red-500' : 'bg-green-500'}`}
+                                    style={{ width: `${probability * 100}%` }}
+                                  ></div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       </div>
