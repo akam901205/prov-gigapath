@@ -40,6 +40,11 @@ interface AnalysisResult {
       confidence: number
       probabilities: { [key: string]: number }
     }
+    xgboost?: {
+      predicted_class: string
+      confidence: number
+      probabilities: { [key: string]: number }
+    }
     breakhis_binary?: {
       logistic_regression: {
         predicted_class: string
@@ -47,6 +52,11 @@ interface AnalysisResult {
         probabilities: { [key: string]: number }
       }
       svm_rbf: {
+        predicted_class: string
+        confidence: number
+        probabilities: { [key: string]: number }
+      }
+      xgboost?: {
         predicted_class: string
         confidence: number
         probabilities: { [key: string]: number }
@@ -614,6 +624,31 @@ export default function SingleImageAnalysisPage() {
                       </div>
                     )}
 
+                    {/* XGBoost Classifier */}
+                    {analysisResult?.gigapath_verdict?.xgboost && (
+                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-6 mb-6">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Brain className="w-8 h-8 text-purple-600" />
+                            <div>
+                              <h4 className="text-xl font-bold text-gray-900">
+                                XGBoost: {analysisResult.gigapath_verdict.xgboost.predicted_class?.toUpperCase() || 'PROCESSING'}
+                              </h4>
+                              <p className="text-purple-600 font-medium">
+                                Gradient Boosting Classifier
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-purple-600">
+                              {analysisResult.gigapath_verdict.xgboost.confidence ? (analysisResult.gigapath_verdict.xgboost.confidence * 100).toFixed(1) : '0.0'}%
+                            </div>
+                            <div className="text-sm text-gray-600">XGBoost Confidence</div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* SVM Class Probabilities */}
                     {analysisResult?.gigapath_verdict?.svm_rbf?.probabilities && (
                       <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
@@ -647,11 +682,44 @@ export default function SingleImageAnalysisPage() {
                       </div>
                     )}
 
+                    {/* XGBoost Class Probabilities */}
+                    {analysisResult?.gigapath_verdict?.xgboost?.probabilities && (
+                      <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
+                        <h4 className="font-semibold mb-4">XGBoost Class Probabilities</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          {Object.entries(analysisResult.gigapath_verdict.xgboost.probabilities).map(([className, probability]) => (
+                            <div key={className} className="text-center">
+                              <div className={`text-lg font-bold ${
+                                className === 'normal' ? 'text-green-600' :
+                                className === 'benign' ? 'text-blue-600' :
+                                className === 'insitu' ? 'text-orange-600' :
+                                className === 'invasive' ? 'text-red-600' : 'text-gray-600'
+                              }`}>
+                                {(probability * 100).toFixed(1)}%
+                              </div>
+                              <div className="text-sm text-gray-600 capitalize">{className}</div>
+                              <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
+                                <div 
+                                  className={`h-2 rounded-full ${
+                                    className === 'normal' ? 'bg-green-600' :
+                                    className === 'benign' ? 'bg-blue-600' :
+                                    className === 'insitu' ? 'bg-orange-600' :
+                                    className === 'invasive' ? 'bg-red-600' : 'bg-gray-600'
+                                  }`}
+                                  style={{ width: `${probability * 100}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Classifier Comparison */}
                     {analysisResult?.gigapath_verdict?.logistic_regression && analysisResult?.gigapath_verdict?.svm_rbf && (
                       <div className="bg-gray-50 rounded-lg p-6 mb-6">
                         <h4 className="font-semibold mb-4 text-center">Classifier Comparison</h4>
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className={`grid gap-6 ${analysisResult?.gigapath_verdict?.xgboost ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2'}`}>
                           <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
                             <h5 className="font-medium text-indigo-700 mb-2">Logistic Regression</h5>
                             <div className="text-sm space-y-1">
@@ -668,6 +736,16 @@ export default function SingleImageAnalysisPage() {
                               <div className="text-xs text-gray-600">Non-linear RBF kernel</div>
                             </div>
                           </div>
+                          {analysisResult?.gigapath_verdict?.xgboost && (
+                            <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
+                              <h5 className="font-medium text-purple-700 mb-2">XGBoost</h5>
+                              <div className="text-sm space-y-1">
+                                <div>Prediction: <span className="font-medium">{analysisResult.gigapath_verdict.xgboost.predicted_class}</span></div>
+                                <div>Confidence: <span className="font-medium">{(analysisResult.gigapath_verdict.xgboost.confidence * 100).toFixed(1)}%</span></div>
+                                <div className="text-xs text-gray-600">Gradient boosting trees</div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -678,7 +756,7 @@ export default function SingleImageAnalysisPage() {
                         <h4 className="font-semibold mb-4 text-center text-gray-700">BreakHis Binary Classification (Malignant vs Benign)</h4>
                         <p className="text-sm text-center text-gray-600 mb-4">Trained on 1,817 BreakHis samples with honest test evaluation</p>
                         
-                        <div className="grid grid-cols-2 gap-6">
+                        <div className={`grid gap-6 ${analysisResult?.gigapath_verdict?.breakhis_binary?.xgboost ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2'}`}>
                           {/* BreakHis Logistic Regression */}
                           <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                             <h5 className="font-medium text-blue-700 mb-3">BreakHis Logistic Regression</h5>
@@ -722,6 +800,30 @@ export default function SingleImageAnalysisPage() {
                               </div>
                             </div>
                           </div>
+                          
+                          {/* BreakHis XGBoost */}
+                          {analysisResult?.gigapath_verdict?.breakhis_binary?.xgboost && (
+                            <div className="bg-red-50 rounded-lg p-4 border border-red-200">
+                              <h5 className="font-medium text-red-700 mb-3">BreakHis XGBoost</h5>
+                              <div className="text-sm space-y-2">
+                                <div className="flex justify-between">
+                                  <span>Prediction:</span>
+                                  <span className={`font-medium ${
+                                    analysisResult.gigapath_verdict.breakhis_binary.xgboost.predicted_class === 'malignant' ? 'text-red-600' : 'text-green-600'
+                                  }`}>
+                                    {analysisResult.gigapath_verdict.breakhis_binary.xgboost.predicted_class?.toUpperCase()}
+                                  </span>
+                                </div>
+                                <div className="flex justify-between">
+                                  <span>Confidence:</span>
+                                  <span className="font-medium">{(analysisResult.gigapath_verdict.breakhis_binary.xgboost.confidence * 100).toFixed(1)}%</span>
+                                </div>
+                                <div className="text-xs text-gray-600 mt-2">
+                                  Test Accuracy: {analysisResult.gigapath_verdict.breakhis_binary.model_info?.test_accuracy_xgb ? (analysisResult.gigapath_verdict.breakhis_binary.model_info.test_accuracy_xgb * 100).toFixed(1) : 'N/A'}%
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* BreakHis Binary Probabilities */}
@@ -731,9 +833,12 @@ export default function SingleImageAnalysisPage() {
                             {Object.entries(analysisResult.gigapath_verdict.breakhis_binary.logistic_regression.probabilities || {}).map(([className, probability]) => (
                               <div key={className} className="text-center">
                                 <div className="text-sm text-gray-600 mb-1 capitalize">{className}</div>
-                                <div className="flex justify-between text-xs">
+                                <div className={`flex justify-between text-xs ${analysisResult?.gigapath_verdict?.breakhis_binary?.xgboost ? 'flex-col space-y-1' : ''}`}>
                                   <span>LR: {(probability * 100).toFixed(1)}%</span>
                                   <span>SVM: {((analysisResult.gigapath_verdict.breakhis_binary.svm_rbf.probabilities?.[className] || 0) * 100).toFixed(1)}%</span>
+                                  {analysisResult?.gigapath_verdict?.breakhis_binary?.xgboost && (
+                                    <span>XGB: {((analysisResult.gigapath_verdict.breakhis_binary.xgboost.probabilities?.[className] || 0) * 100).toFixed(1)}%</span>
+                                  )}
                                 </div>
                                 <div className="w-full bg-gray-200 rounded-full h-2 mt-1">
                                   <div 

@@ -38,6 +38,124 @@ class NumpyEncoder(json.JSONEncoder):
             return bool(obj)
         return super().default(obj)
 
+# Robust classifier prediction functions with isolated error handling
+def safe_predict_bach_lr(bach_classifier, features):
+    """Safely predict with BACH Logistic Regression - isolated from ROC errors"""
+    try:
+        if not bach_classifier or not bach_classifier.model:
+            return None
+        result = bach_classifier.predict(features)
+        print(f"🔥 BACH LR prediction successful: {result['predicted_class']} ({result['confidence']:.3f})")
+        return result
+    except Exception as e:
+        print(f"❌ BACH LR prediction failed: {e}")
+        return None
+
+def safe_predict_bach_svm(bach_classifier, features):
+    """Safely predict with BACH SVM - isolated from ROC errors"""
+    try:
+        if not bach_classifier or not bach_classifier.svm_model:
+            return None
+        result = bach_classifier.predict_svm(features)
+        print(f"🔥 BACH SVM prediction successful: {result['predicted_class']} ({result['confidence']:.3f})")
+        return result
+    except Exception as e:
+        print(f"❌ BACH SVM prediction failed: {e}")
+        return None
+
+def safe_predict_bach_xgb(bach_classifier, features):
+    """Safely predict with BACH XGBoost - isolated from ROC errors"""
+    try:
+        if not bach_classifier or not hasattr(bach_classifier, 'xgb_model') or not bach_classifier.xgb_model:
+            return None
+        result = bach_classifier.predict_xgb(features)
+        print(f"🔥 BACH XGBoost prediction successful: {result['predicted_class']} ({result['confidence']:.3f})")
+        return result
+    except Exception as e:
+        print(f"❌ BACH XGBoost prediction failed: {e}")
+        return None
+
+def safe_predict_breakhis_lr(breakhis_classifier, features):
+    """Safely predict with BreakHis Logistic Regression"""
+    try:
+        if not breakhis_classifier or not breakhis_classifier.lr_model:
+            return None
+        result = breakhis_classifier.predict_lr(features)
+        print(f"🔥 BreakHis LR prediction successful: {result['predicted_class']} ({result['confidence']:.3f})")
+        return result
+    except Exception as e:
+        print(f"❌ BreakHis LR prediction failed: {e}")
+        return None
+
+def safe_predict_breakhis_svm(breakhis_classifier, features):
+    """Safely predict with BreakHis SVM"""
+    try:
+        if not breakhis_classifier or not breakhis_classifier.svm_model:
+            return None
+        result = breakhis_classifier.predict_svm(features)
+        print(f"🔥 BreakHis SVM prediction successful: {result['predicted_class']} ({result['confidence']:.3f})")
+        return result
+    except Exception as e:
+        print(f"❌ BreakHis SVM prediction failed: {e}")
+        return None
+
+def safe_predict_breakhis_xgb(breakhis_classifier, features):
+    """Safely predict with BreakHis XGBoost"""
+    try:
+        if not breakhis_classifier or not hasattr(breakhis_classifier, 'xgb_model') or not breakhis_classifier.xgb_model:
+            return None
+        result = breakhis_classifier.predict_xgb(features)
+        print(f"🔥 BreakHis XGBoost prediction successful: {result['predicted_class']} ({result['confidence']:.3f})")
+        return result
+    except Exception as e:
+        print(f"❌ BreakHis XGBoost prediction failed: {e}")
+        return None
+
+def safe_generate_roc_plot(classifier, classifier_name):
+    """Safely generate ROC plot without affecting predictions"""
+    try:
+        if hasattr(classifier, 'plot_roc_curves'):
+            return classifier.plot_roc_curves(return_base64=True)
+    except Exception as e:
+        print(f"⚠️ ROC plot generation failed for {classifier_name}: {e}")
+        return None
+
+def get_model_info_safe(classifier, classifier_name):
+    """Safely extract model info without exceptions"""
+    try:
+        if not classifier:
+            return {"status": f"{classifier_name} not loaded"}
+            
+        info = {
+            "classifier": classifier_name,
+            "classes": getattr(classifier, 'class_names', []),
+            "evaluation_type": "HELD_OUT_TEST_SET"
+        }
+        
+        # Add test scores if available
+        if hasattr(classifier, 'test_scores') and classifier.test_scores:
+            info["test_accuracy_lr"] = float(classifier.test_scores['accuracy'])
+        if hasattr(classifier, 'svm_test_scores') and classifier.svm_test_scores:
+            info["test_accuracy_svm"] = float(classifier.svm_test_scores['accuracy'])
+        if hasattr(classifier, 'xgb_test_scores') and classifier.xgb_test_scores:
+            info["test_accuracy_xgb"] = float(classifier.xgb_test_scores['accuracy'])
+            
+        # Add ROC AUC if available
+        if hasattr(classifier, 'test_roc_data') and classifier.test_roc_data:
+            info["test_roc_auc_lr"] = float(classifier.test_roc_data['roc_auc'].get('micro', 0))
+        if hasattr(classifier, 'svm_test_roc_data') and classifier.svm_test_roc_data:
+            info["test_roc_auc_svm"] = float(classifier.svm_test_roc_data['roc_auc'].get('micro', 0))
+        if hasattr(classifier, 'xgb_test_roc_data') and classifier.xgb_test_roc_data:
+            info["test_roc_auc_xgb"] = float(classifier.xgb_test_roc_data['roc_auc'].get('micro', 0))
+            
+        if hasattr(classifier, 'data_splits'):
+            info["data_splits"] = classifier.data_splits
+            
+        return info
+    except Exception as e:
+        print(f"⚠️ Model info extraction failed for {classifier_name}: {e}")
+        return {"status": f"{classifier_name} info extraction failed", "error": str(e)}
+
 # Recursive function to convert numpy types in nested dictionaries
 def convert_numpy_types(obj):
     if isinstance(obj, dict):
@@ -673,6 +791,8 @@ async def single_image_analysis(request: AnalyzeRequest):
         # REAL BACH LOGISTIC REGRESSION CLASSIFIER
         # Load and use the actual trained BACH classifier
         bach_classifier_result = None
+        svm_classifier_result = None
+        xgb_classifier_result = None
         bach_roc_plot = None
         bach_model_info = None
         
@@ -680,116 +800,66 @@ async def single_image_analysis(request: AnalyzeRequest):
         # Load and use the actual trained BreakHis binary classifier
         breakhis_lr_result = None
         breakhis_svm_result = None
+        breakhis_xgb_result = None
         breakhis_roc_plot = None
         breakhis_model_info = None
         
-        try:
-            print("🔥 Loading BACH classifier...")
-            bach_classifier = load_bach_classifier()
-            print(f"🔥 BACH classifier loaded: {bach_classifier is not None}")
-            
-            if bach_classifier and bach_classifier.model is not None:
-                print(f"🔥 BACH classifier model exists: {bach_classifier.model is not None}")
-                print(f"🔥 BACH classifier classes: {bach_classifier.class_names}")
-                
-                # Use real classifier prediction on actual GigaPath features
-                print(f"🔥 Features prepared for classifier: shape {l2_features_for_classifier.shape}")
-                
-                bach_classifier_result = bach_classifier.predict(l2_features_for_classifier)
-                print(f"🔥 BACH classifier prediction: {bach_classifier_result}")
-                
-                # Generate SVM prediction if available
-                svm_classifier_result = None
-                if bach_classifier.svm_model is not None:
-                    try:
-                        svm_classifier_result = bach_classifier.predict_svm(l2_features_for_classifier)
-                        print(f"🔥 SVM classifier prediction: {svm_classifier_result}")
-                    except Exception as svm_error:
-                        print(f"🔥 SVM prediction error: {svm_error}")
-                        svm_classifier_result = None
-                else:
-                    print("🔥 SVM model not available in loaded classifier")
-                
-                # Generate real ROC plot
-                bach_roc_plot = bach_classifier.plot_roc_curves(return_base64=True)
-                print(f"🔥 ROC plot generated: {bach_roc_plot is not None}")
-                
-                # Real model info with HONEST test performance
-                bach_model_info = {
-                    "algorithm": "Dual Classifier (Logistic Regression + SVM RBF)",
-                    "classes": bach_classifier.class_names,
-                    "test_accuracy_lr": float(bach_classifier.test_scores['accuracy']) if bach_classifier.test_scores else 0.0,
-                    "test_accuracy_svm": float(bach_classifier.svm_test_scores['accuracy']) if bach_classifier.svm_test_scores else 0.0,
-                    "test_roc_auc_lr": float(bach_classifier.test_roc_data['roc_auc']['micro']) if bach_classifier.test_roc_data else 0.0,
-                    "test_roc_auc_svm": float(bach_classifier.svm_test_roc_data['roc_auc']['micro']) if bach_classifier.svm_test_roc_data else 0.0,
-                    "data_splits": bach_classifier.data_splits,
-                    "evaluation_type": "HELD_OUT_TEST_SET"
-                }
-                print(f"🔥 Model info: LR Test accuracy = {bach_model_info['test_accuracy_lr']:.3f}, SVM Test accuracy = {bach_model_info['test_accuracy_svm']:.3f}")
-                
-                print(f"🔥 REAL BACH CLASSIFIER SUCCESS: {bach_classifier_result['predicted_class']} (conf: {bach_classifier_result['confidence']:.3f})")
-            else:
-                print("🔥 BACH classifier model not loaded - using fallback")
-                bach_classifier_result = {
-                    "predicted_class": "normal",
-                    "confidence": 0.5,
-                    "probabilities": {"normal": 0.5, "benign": 0.3, "insitu": 0.1, "invasive": 0.1}
-                }
-                bach_roc_plot = None
-                bach_model_info = {"cv_accuracy": 0.0, "cv_std": 0.0, "status": "not_loaded"}
-        except Exception as e:
-            print(f"🔥 BACH classifier EXCEPTION: {e}")
-            print(f"🔥 Exception traceback: {traceback.format_exc()}")
-            # Ensure variables are always defined to prevent frontend errors
-            bach_classifier_result = {
-                "predicted_class": "normal",
-                "confidence": 0.5,
-                "probabilities": {"normal": 0.5, "benign": 0.3, "insitu": 0.1, "invasive": 0.1}
-            }
-            bach_roc_plot = None
-            bach_model_info = {"cv_accuracy": 0.0, "cv_std": 0.0, "status": "error"}
+        # ROBUST BACH CLASSIFIER PREDICTIONS - No exceptions affect predictions
+        print("🔥 Loading BACH classifier...")
+        bach_classifier = load_bach_classifier()
+        print(f"🔥 BACH classifier loaded: {bach_classifier is not None}")
         
-        # BREAKHIS BINARY CLASSIFIER EXECUTION
-        try:
-            print("🔥 Loading BreakHis binary classifier...")
-            breakhis_classifier = load_breakhis_classifier()
-            print(f"🔥 BreakHis classifier loaded: {breakhis_classifier is not None}")
+        if bach_classifier:
+            print(f"🔥 Features prepared for classifier: shape {l2_features_for_classifier.shape}")
             
-            if breakhis_classifier and breakhis_classifier.lr_model is not None:
-                print("🔥 Executing BreakHis binary classification...")
-                
-                # Logistic Regression prediction
-                breakhis_lr_result = breakhis_classifier.predict_lr(l2_features_for_classifier)
-                print(f"🔥 BreakHis LR prediction: {breakhis_lr_result}")
-                
-                # SVM prediction  
-                if breakhis_classifier.svm_model is not None:
-                    breakhis_svm_result = breakhis_classifier.predict_svm(l2_features_for_classifier)
-                    print(f"🔥 BreakHis SVM prediction: {breakhis_svm_result}")
-                
-                # Generate BreakHis ROC plot
-                breakhis_roc_plot = breakhis_classifier.plot_roc_curves(return_base64=True)
-                print(f"🔥 BreakHis ROC plot generated: {breakhis_roc_plot is not None}")
-                
-                # BreakHis model info
-                breakhis_model_info = {
-                    "algorithm": "Binary Classification (LR + SVM RBF)",
-                    "classes": breakhis_classifier.class_names,
-                    "test_accuracy_lr": float(breakhis_classifier.test_scores_lr['accuracy']) if breakhis_classifier.test_scores_lr else 0.0,
-                    "test_accuracy_svm": float(breakhis_classifier.test_scores_svm['accuracy']) if breakhis_classifier.test_scores_svm else 0.0,
-                    "test_roc_auc_lr": float(breakhis_classifier.test_roc_data_lr['roc_auc']) if breakhis_classifier.test_roc_data_lr else 0.0,
-                    "test_roc_auc_svm": float(breakhis_classifier.test_roc_data_svm['roc_auc']) if breakhis_classifier.test_roc_data_svm else 0.0,
-                    "data_splits": breakhis_classifier.data_splits,
-                    "evaluation_type": "HELD_OUT_TEST_SET",
-                    "dataset": "BreakHis"
-                }
-                
-                print(f"🔥 BreakHis SUCCESS: LR={breakhis_lr_result['predicted_class']} ({breakhis_lr_result['confidence']:.3f}), SVM={breakhis_svm_result['predicted_class'] if breakhis_svm_result else 'N/A'}")
-            else:
-                print("🔥 BreakHis classifier not available")
-        except Exception as e:
-            print(f"🔥 BreakHis classifier error: {e}")
-            print(f"🔥 BreakHis exception traceback: {traceback.format_exc()}")
+            # Use safe prediction functions - each isolated from failures
+            bach_classifier_result = safe_predict_bach_lr(bach_classifier, l2_features_for_classifier)
+            svm_classifier_result = safe_predict_bach_svm(bach_classifier, l2_features_for_classifier) 
+            xgb_classifier_result = safe_predict_bach_xgb(bach_classifier, l2_features_for_classifier)
+            
+            # ROC plot generation - separate from predictions
+            bach_roc_plot = safe_generate_roc_plot(bach_classifier, "BACH")
+            
+            # Model info - separate from predictions
+            bach_model_info = get_model_info_safe(bach_classifier, "BACH")
+            
+            print(f"🎯 BACH RESULTS: LR={bach_classifier_result['predicted_class'] if bach_classifier_result else 'FAILED'}, SVM={svm_classifier_result['predicted_class'] if svm_classifier_result else 'FAILED'}, XGB={xgb_classifier_result['predicted_class'] if xgb_classifier_result else 'FAILED'}")
+        else:
+            print("❌ BACH classifier not loaded")
+            bach_classifier_result = None
+            svm_classifier_result = None
+            xgb_classifier_result = None
+            bach_roc_plot = None
+            bach_model_info = {"status": "BACH classifier not loaded"}
+        
+        # ROBUST BREAKHIS CLASSIFIER PREDICTIONS - No exceptions affect predictions
+        print("🔥 Loading BreakHis binary classifier...")
+        breakhis_classifier = load_breakhis_classifier()
+        print(f"🔥 BreakHis classifier loaded: {breakhis_classifier is not None}")
+        
+        if breakhis_classifier:
+            print("🔥 Executing BreakHis binary classification...")
+            
+            # Use safe prediction functions - each isolated from failures
+            breakhis_lr_result = safe_predict_breakhis_lr(breakhis_classifier, l2_features_for_classifier)
+            breakhis_svm_result = safe_predict_breakhis_svm(breakhis_classifier, l2_features_for_classifier)
+            breakhis_xgb_result = safe_predict_breakhis_xgb(breakhis_classifier, l2_features_for_classifier)
+            
+            # ROC plot generation - separate from predictions
+            breakhis_roc_plot = safe_generate_roc_plot(breakhis_classifier, "BreakHis")
+            
+            # Model info - separate from predictions  
+            breakhis_model_info = get_model_info_safe(breakhis_classifier, "BreakHis")
+            breakhis_model_info["dataset"] = "BreakHis"
+            
+            print(f"🎯 BREAKHIS RESULTS: LR={breakhis_lr_result['predicted_class'] if breakhis_lr_result else 'FAILED'}, SVM={breakhis_svm_result['predicted_class'] if breakhis_svm_result else 'FAILED'}, XGB={breakhis_xgb_result['predicted_class'] if breakhis_xgb_result else 'FAILED'}")
+        else:
+            print("❌ BreakHis classifier not loaded")
+            breakhis_lr_result = None
+            breakhis_svm_result = None
+            breakhis_xgb_result = None
+            breakhis_roc_plot = None
+            breakhis_model_info = {"status": "BreakHis classifier not loaded"}
         
         # Real similarity analysis with L2 normalized features
         combined_data = cache['combined']
@@ -1079,23 +1149,27 @@ async def single_image_analysis(request: AnalyzeRequest):
             "gigapath_verdict": {
                 # Real BACH Logistic Regression Classification
                 # Uses actual trained model on GigaPath features for 4-class BACH classification
-                "logistic_regression": bach_classifier_result if 'bach_classifier_result' in locals() else {
+                "logistic_regression": bach_classifier_result if bach_classifier_result else {
                     "predicted_class": final_prediction,
                     "confidence": float(confidence),
-                    "probabilities": {"error": "BACH classifier not available"}
+                    "probabilities": {cls: 0.25 for cls in ['normal', 'benign', 'insitu', 'invasive']},
+                    "status": "BACH LR not available"
                 },
                 # SVM RBF Classifier Results
                 # Support Vector Machine with Radial Basis Function kernel for comparison
-                "svm_rbf": svm_classifier_result if 'svm_classifier_result' in locals() and svm_classifier_result else {
+                "svm_rbf": svm_classifier_result if svm_classifier_result else {
                     "predicted_class": final_prediction,
                     "confidence": float(confidence),
-                    "probabilities": {
-                        "normal": 0.25,
-                        "benign": 0.25, 
-                        "insitu": 0.25,
-                        "invasive": 0.25
-                    },
-                    "status": "SVM not trained - showing uniform distribution"
+                    "probabilities": {cls: 0.25 for cls in ['normal', 'benign', 'insitu', 'invasive']},
+                    "status": "BACH SVM not available"
+                },
+                # XGBoost Classifier Results
+                # Gradient boosting classifier for enhanced accuracy
+                "xgboost": xgb_classifier_result if xgb_classifier_result else {
+                    "predicted_class": final_prediction,
+                    "confidence": float(confidence),
+                    "probabilities": {cls: 0.25 for cls in ['normal', 'benign', 'insitu', 'invasive']},
+                    "status": "BACH XGBoost not available"
                 },
                 # BreakHis Binary Classification Results
                 # Malignant vs Non-malignant classification trained on BreakHis dataset
@@ -1112,6 +1186,12 @@ async def single_image_analysis(request: AnalyzeRequest):
                         "probabilities": {"benign": 0.5, "malignant": 0.5},
                         "status": "BreakHis SVM not available"
                     },
+                    "xgboost": breakhis_xgb_result if breakhis_xgb_result else {
+                        "predicted_class": "benign",
+                        "confidence": 0.5,
+                        "probabilities": {"benign": 0.5, "malignant": 0.5},
+                        "status": "BreakHis XGBoost not available"
+                    },
                     "roc_plot_base64": breakhis_roc_plot if breakhis_roc_plot else None,
                     "model_info": breakhis_model_info if breakhis_model_info else {
                         "algorithm": "Binary Classification (LR + SVM RBF)",
@@ -1122,9 +1202,9 @@ async def single_image_analysis(request: AnalyzeRequest):
                     }
                 },
                 # Real ROC curve from trained model
-                "roc_plot_base64": bach_roc_plot if 'bach_roc_plot' in locals() else None,
+                "roc_plot_base64": bach_roc_plot,
                 # Actual model performance metrics
-                "model_info": bach_model_info if 'bach_model_info' in locals() else {
+                "model_info": bach_model_info if bach_model_info else {
                     "algorithm": "Logistic Regression (One-vs-Rest)", 
                     "classes": ["normal", "benign", "insitu", "invasive"],
                     "cv_accuracy": 0.0,

@@ -18,20 +18,32 @@ from sklearn.multiclass import OneVsRestClassifier
 import warnings
 warnings.filterwarnings('ignore')
 
+try:
+    import xgboost as xgb
+    XGBOOST_AVAILABLE = True
+except ImportError:
+    XGBOOST_AVAILABLE = False
+    print("XGBoost not available. Install with: pip install xgboost")
+
 class BACHLogisticClassifier:
     def __init__(self, cache_file='/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl'):
         self.cache_file = cache_file
         self.model = None
         self.svm_model = None
+        self.xgb_model = None
         self.label_encoder = None
         self.cv_scores = None
         self.svm_cv_scores = None
+        self.xgb_cv_scores = None
         self.test_scores = None
         self.svm_test_scores = None
+        self.xgb_test_scores = None
         self.roc_data = None
         self.svm_roc_data = None
+        self.xgb_roc_data = None
         self.test_roc_data = None
         self.svm_test_roc_data = None
+        self.xgb_test_roc_data = None
         self.data_splits = None
         self.class_names = ['normal', 'benign', 'insitu', 'invasive']
         
@@ -156,14 +168,56 @@ class BACHLogisticClassifier:
         # Generate SVM TEST ROC curves
         self.generate_svm_test_roc_curves(y_test, svm_test_pred_proba, "SVM RBF")
         
+        # XGBOOST TRAINING
+        xgb_test_accuracy = 0.0
+        xgb_test_pred_proba = None
+        xgb_test_pred = None
+        
+        if XGBOOST_AVAILABLE:
+            print("\n🔥 Training XGBoost...")
+            self.xgb_model = xgb.XGBClassifier(
+                objective='multi:softprob',
+                n_estimators=100,
+                max_depth=6,
+                learning_rate=0.1,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                eval_metric='mlogloss'
+            )
+            
+            # Train on training set only
+            self.xgb_model.fit(X_train, y_train)
+            
+            # Validation performance
+            xgb_val_pred_proba = self.xgb_model.predict_proba(X_val)
+            xgb_val_pred = self.xgb_model.predict(X_val)
+            xgb_val_accuracy = (xgb_val_pred == y_val).mean()
+            
+            # TEST PERFORMANCE (held-out)
+            xgb_test_pred_proba = self.xgb_model.predict_proba(X_test)
+            xgb_test_pred = self.xgb_model.predict(X_test)
+            xgb_test_accuracy = (xgb_test_pred == y_test).mean()
+            
+            print(f"  Validation Accuracy: {xgb_val_accuracy:.3f}")
+            print(f"  🎯 TEST Accuracy: {xgb_test_accuracy:.3f}")
+            
+            # Generate XGBoost TEST ROC curves
+            self.generate_xgb_test_roc_curves(y_test, xgb_test_pred_proba, "XGBoost")
+        else:
+            print("\n⚠️ XGBoost not available - skipping XGBoost training")
+        
         # Store test scores (what we actually report)
         self.test_scores = {'accuracy': test_accuracy, 'predictions': test_pred, 'probabilities': test_pred_proba}
         self.svm_test_scores = {'accuracy': svm_test_accuracy, 'predictions': svm_test_pred, 'probabilities': svm_test_pred_proba}
+        self.xgb_test_scores = {'accuracy': xgb_test_accuracy, 'predictions': xgb_test_pred, 'probabilities': xgb_test_pred_proba} if XGBOOST_AVAILABLE else None
         
         # Print HONEST test performance
         print(f"\\n🎯 HONEST TEST PERFORMANCE:")
         print(f"  Logistic Regression Test Accuracy: {test_accuracy:.3f}")
         print(f"  SVM RBF Test Accuracy: {svm_test_accuracy:.3f}")
+        if XGBOOST_AVAILABLE:
+            print(f"  XGBoost Test Accuracy: {xgb_test_accuracy:.3f}")
         
         print("\\n📈 Test Set Classification Reports:")
         print("\\nLogistic Regression (Test Set):")
@@ -171,6 +225,10 @@ class BACHLogisticClassifier:
         
         print("\\nSVM RBF (Test Set):")
         print(classification_report(y_test, svm_test_pred, target_names=self.label_encoder.classes_))
+        
+        if XGBOOST_AVAILABLE and xgb_test_pred is not None:
+            print("\\nXGBoost (Test Set):")
+            print(classification_report(y_test, xgb_test_pred, target_names=self.label_encoder.classes_))
         
         return self.model, self.label_encoder
     
@@ -314,6 +372,42 @@ class BACHLogisticClassifier:
         
         return self.svm_test_roc_data
     
+    def generate_xgb_test_roc_curves(self, y_true, y_pred_proba, classifier_name):
+        """Generate XGBoost ROC curves from TEST SET predictions"""
+        n_classes = len(self.label_encoder.classes_)
+        
+        # Binarize labels for ROC computation
+        from sklearn.preprocessing import label_binarize
+        y_bin = label_binarize(y_true, classes=range(n_classes))
+        
+        # Compute ROC curve for each class
+        fpr = {}
+        tpr = {}
+        roc_auc = {}
+        
+        for i in range(n_classes):
+            fpr[i], tpr[i], _ = roc_curve(y_bin[:, i], y_pred_proba[:, i])
+            roc_auc[i] = auc(fpr[i], tpr[i])
+        
+        # Compute micro-average ROC curve
+        fpr["micro"], tpr["micro"], _ = roc_curve(y_bin.ravel(), y_pred_proba.ravel())
+        roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
+        
+        # Store XGBoost TEST ROC data
+        self.xgb_test_roc_data = {
+            'fpr': fpr,
+            'tpr': tpr,
+            'roc_auc': roc_auc,
+            'class_names': self.label_encoder.classes_.tolist(),
+            'classifier': classifier_name,
+            'evaluation_type': 'TEST_SET'
+        }
+        
+        print(f"{classifier_name} TEST ROC AUC scores: {[(self.label_encoder.classes_[i], roc_auc[i]) for i in range(n_classes)]}")
+        print(f"{classifier_name} TEST Micro-average ROC AUC: {roc_auc['micro']:.3f}")
+        
+        return self.xgb_test_roc_data
+    
     def plot_roc_curves(self, save_path=None, return_base64=False):
         """Generate ROC curve plots"""
         if not self.roc_data:
@@ -438,22 +532,62 @@ class BACHLogisticClassifier:
         
         return result
     
+    def predict_xgb(self, features):
+        """Predict using XGBoost classifier"""
+        if not XGBOOST_AVAILABLE or self.xgb_model is None:
+            raise ValueError("XGBoost model not trained or not available. Call train_classifier() first.")
+        
+        # Ensure features are 2D
+        if len(features.shape) == 1:
+            features = features.reshape(1, -1)
+        
+        # Get probabilities for each class
+        probabilities = self.xgb_model.predict_proba(features)[0]
+        predicted_class_idx = np.argmax(probabilities)
+        predicted_class = self.label_encoder.classes_[predicted_class_idx]
+        confidence = probabilities[predicted_class_idx]
+        
+        # Create result dictionary
+        result = {
+            'predicted_class': predicted_class,
+            'confidence': float(confidence),
+            'probabilities': {
+                class_name: float(prob) 
+                for class_name, prob in zip(self.label_encoder.classes_, probabilities)
+            },
+            'class_ranking': [
+                {
+                    'class': self.label_encoder.classes_[i],
+                    'probability': float(probabilities[i])
+                }
+                for i in np.argsort(probabilities)[::-1]  # Sort by probability descending
+            ]
+        }
+        
+        return result
+    
     def save_model(self, model_path='/workspace/bach_logistic_model.pkl'):
         """Save trained model and label encoder"""
         model_data = {
             'model': self.model,
             'svm_model': self.svm_model,
+            'xgb_model': self.xgb_model if XGBOOST_AVAILABLE else None,
             'label_encoder': self.label_encoder,
             'cv_scores': self.cv_scores,
             'svm_cv_scores': self.svm_cv_scores,
+            'xgb_cv_scores': self.xgb_cv_scores,
             'test_scores': self.test_scores,
             'svm_test_scores': self.svm_test_scores,
+            'xgb_test_scores': self.xgb_test_scores,
             'roc_data': self.roc_data,
             'svm_roc_data': self.svm_roc_data,
+            'xgb_roc_data': self.xgb_roc_data,
             'test_roc_data': self.test_roc_data,
             'svm_test_roc_data': self.svm_test_roc_data,
+            'xgb_test_roc_data': self.xgb_test_roc_data,
             'data_splits': self.data_splits,
-            'class_names': self.class_names
+            'class_names': self.class_names,
+            'xgboost_available': XGBOOST_AVAILABLE
         }
         
         with open(model_path, 'wb') as f:
@@ -470,20 +604,30 @@ class BACHLogisticClassifier:
             
             self.model = model_data['model']
             self.svm_model = model_data.get('svm_model', None)
+            self.xgb_model = model_data.get('xgb_model', None)
             self.label_encoder = model_data['label_encoder']
             self.cv_scores = model_data.get('cv_scores', None)
             self.svm_cv_scores = model_data.get('svm_cv_scores', None)
+            self.xgb_cv_scores = model_data.get('xgb_cv_scores', None)
             self.test_scores = model_data.get('test_scores', None)
             self.svm_test_scores = model_data.get('svm_test_scores', None)
+            self.xgb_test_scores = model_data.get('xgb_test_scores', None)
             self.roc_data = model_data.get('roc_data', None)
             self.svm_roc_data = model_data.get('svm_roc_data', None)
+            self.xgb_roc_data = model_data.get('xgb_roc_data', None)
             self.test_roc_data = model_data.get('test_roc_data', None)
             self.svm_test_roc_data = model_data.get('svm_test_roc_data', None)
+            self.xgb_test_roc_data = model_data.get('xgb_test_roc_data', None)
             self.data_splits = model_data.get('data_splits', None)
             self.class_names = model_data['class_names']
             
             print(f"Model loaded from: {model_path}")
-            print(f"CV Accuracy: {self.cv_scores.mean():.3f} ± {self.cv_scores.std():.3f}")
+            if self.test_scores:
+                print(f"LR Test Accuracy: {self.test_scores['accuracy']:.3f}")
+            if self.svm_test_scores:
+                print(f"SVM Test Accuracy: {self.svm_test_scores['accuracy']:.3f}")
+            if self.xgb_test_scores and XGBOOST_AVAILABLE:
+                print(f"XGBoost Test Accuracy: {self.xgb_test_scores['accuracy']:.3f}")
             return True
             
         except FileNotFoundError:
@@ -523,6 +667,18 @@ if __name__ == "__main__":
     
     # Test on first 3 samples
     for i in range(3):
-        result = classifier.predict(features[i])
+        lr_result = classifier.predict(features[i])
         actual = labels[i]
-        print(f"Sample {i+1}: Predicted={result['predicted_class']} (conf: {result['confidence']:.3f}), Actual={actual}")
+        
+        result_str = f"Sample {i+1}: LR={lr_result['predicted_class']} ({lr_result['confidence']:.3f})"
+        
+        if classifier.svm_model:
+            svm_result = classifier.predict_svm(features[i])
+            result_str += f", SVM={svm_result['predicted_class']} ({svm_result['confidence']:.3f})"
+        
+        if XGBOOST_AVAILABLE and classifier.xgb_model:
+            xgb_result = classifier.predict_xgb(features[i])
+            result_str += f", XGB={xgb_result['predicted_class']} ({xgb_result['confidence']:.3f})"
+        
+        result_str += f", Actual={actual}"
+        print(result_str)
