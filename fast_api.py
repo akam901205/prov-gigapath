@@ -23,6 +23,44 @@ from sklearn.manifold import TSNE
 import umap.umap_ as umap
 from sklearn.decomposition import PCA
 import traceback
+import json
+
+# Custom JSON encoder to handle numpy types
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        return super().default(obj)
+
+# Recursive function to convert numpy types in nested dictionaries
+def convert_numpy_types(obj):
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, (list, tuple)):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    elif isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    elif hasattr(obj, 'item'):  # Handle numpy scalars
+        return obj.item()
+    elif str(type(obj)).startswith('<class \'numpy.'):  # Catch any numpy types
+        try:
+            return obj.item() if hasattr(obj, 'item') else float(obj)
+        except (TypeError, ValueError):
+            return str(obj)
+    else:
+        return obj
 
 app = FastAPI(title="GigaPath Fast API", version="1.0.0")
 
@@ -629,6 +667,9 @@ async def single_image_analysis(request: AnalyzeRequest):
         
         new_features = output.cpu().numpy().flatten()
         
+        # Prepare normalized features for both classifiers
+        l2_features_for_classifier = new_features / np.linalg.norm(new_features)
+        
         # REAL BACH LOGISTIC REGRESSION CLASSIFIER
         # Load and use the actual trained BACH classifier
         bach_classifier_result = None
@@ -652,7 +693,6 @@ async def single_image_analysis(request: AnalyzeRequest):
                 print(f"🔥 BACH classifier classes: {bach_classifier.class_names}")
                 
                 # Use real classifier prediction on actual GigaPath features
-                l2_features_for_classifier = new_features / np.linalg.norm(new_features)
                 print(f"🔥 Features prepared for classifier: shape {l2_features_for_classifier.shape}")
                 
                 bach_classifier_result = bach_classifier.predict(l2_features_for_classifier)
@@ -924,7 +964,9 @@ async def single_image_analysis(request: AnalyzeRequest):
                     'spearman': spearman_top_label
                 },
                 'filtered_category': target_labels,
-                'samples_considered': len(relevant_indices)
+                'samples_considered': len(relevant_indices),
+                'malignant_votes': int(malignant_votes),
+                'benign_votes': int(3 - malignant_votes)
             }
             
         else:
@@ -936,7 +978,9 @@ async def single_image_analysis(request: AnalyzeRequest):
                 'bach_subtype': 'benign', 
                 'confidence_level': 'LOW',
                 'agreement_status': 'WEAK',
-                'classification_method': 'Fallback: Insufficient training data'
+                'classification_method': 'Fallback: Insufficient training data',
+                'malignant_votes': 0,
+                'benign_votes': 3
             }
         
         # SIMILARITY-BASED PREDICTIONS for diagnostic verdict
@@ -979,7 +1023,7 @@ async def single_image_analysis(request: AnalyzeRequest):
             new_bach_tsne = project_dataset_specific(l2_new_features, "bach", "tsne", cache)
             new_bach_pca = project_dataset_specific(l2_new_features, "bach", "pca", cache)
         
-        return {
+        result = {
             "status": "success",
             "domain_invariant": {
                 "cached_coordinates": {
@@ -1102,7 +1146,7 @@ async def single_image_analysis(request: AnalyzeRequest):
                 # Risk Assessment Indicators
                 # Computational markers for potential malignancy risk
                 "risk_indicators": {
-                    "high_variance": bool(np.std(l2_new_features) > 0.1),                    # Feature variance analysis
+                    "high_variance": bool(float(np.std(l2_new_features)) > 0.1),              # Feature variance analysis
                     "tissue_irregularity": final_prediction in ['invasive', 'insitu'],      # Structural irregularity
                     "feature_activation": float(confidence)                                  # Neural activation strength
                 }
@@ -1122,8 +1166,8 @@ async def single_image_analysis(request: AnalyzeRequest):
                 "correlation_predictions": correlation_predictions,  # Pearson and Spearman correlations
                 "hierarchical_details": hierarchical_details,  # Detailed hierarchical classification results
                 "vote_breakdown": {
-                    "malignant_votes": hierarchical_details.get('malignant_votes', 2 if final_prediction == "malignant" else 0),
-                    "benign_votes": hierarchical_details.get('benign_votes', 2 if final_prediction == "benign" else 0)
+                    "malignant_votes": int(hierarchical_details.get('malignant_votes', 2 if final_prediction == "malignant" else 0)),
+                    "benign_votes": int(hierarchical_details.get('benign_votes', 2 if final_prediction == "benign" else 0))
                 },
                 "recommendation": f"Based on {confidence:.1%} confidence - {'High' if confidence > 0.8 else 'Moderate' if confidence > 0.6 else 'Low'} confidence prediction",
                 "summary": {
@@ -1142,6 +1186,9 @@ async def single_image_analysis(request: AnalyzeRequest):
                 "device": str(device)
             }
         }
+        
+        # Convert all numpy types to JSON-serializable types
+        return convert_numpy_types(result)
         
     except Exception as e:
         print(f"Error: {e}")
