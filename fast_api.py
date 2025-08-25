@@ -206,10 +206,20 @@ def load_bach_classifier():
         print("🔥 Loading pre-trained BACH classifier...")
         BACH_CLASSIFIER = BACHLogisticClassifier()
         
-        # Load the pre-trained model
-        if not BACH_CLASSIFIER.load_model('/workspace/bach_logistic_model.pkl'):
-            print("❌ Pre-trained BACH model not found!")
+        # Load the retrained model (L2 consistent)
+        retrained_path = '/workspace/bach_logistic_model_L2_RETRAINED.pkl'
+        fallback_path = '/workspace/bach_logistic_model.pkl'
+        
+        if os.path.exists(retrained_path):
+            if not BACH_CLASSIFIER.load_model(retrained_path):
+                print("❌ Retrained BACH model failed to load!")
+                return None
+            print("✅ Using L2 retrained BACH model")
+        elif not BACH_CLASSIFIER.load_model(fallback_path):
+            print("❌ BACH model not found!")
             return None
+        else:
+            print("⚠️ Using old BACH model - preprocessing inconsistency!")
         
         print("✅ BACH classifier loaded successfully")
     
@@ -223,10 +233,20 @@ def load_breakhis_classifier():
         print("🔥 Loading pre-trained BreakHis binary classifier...")
         BREAKHIS_CLASSIFIER = BreakHisBinaryClassifier()
         
-        # Load the pre-trained model
-        if not BREAKHIS_CLASSIFIER.load_model('/workspace/breakhis_binary_model.pkl'):
-            print("❌ Pre-trained BreakHis model not found!")
+        # Load the retrained model (L2 consistent)
+        retrained_path = '/workspace/breakhis_binary_model_L2_RETRAINED.pkl'
+        fallback_path = '/workspace/breakhis_binary_model.pkl'
+        
+        if os.path.exists(retrained_path):
+            if not BREAKHIS_CLASSIFIER.load_model(retrained_path):
+                print("❌ Retrained BreakHis model failed to load!")
+                return None
+            print("✅ Using L2 retrained BreakHis model")
+        elif not BREAKHIS_CLASSIFIER.load_model(fallback_path):
+            print("❌ BreakHis model not found!")
             return None
+        else:
+            print("⚠️ Using old BreakHis model - preprocessing inconsistency!")
         
         print("✅ BreakHis binary classifier loaded successfully")
     
@@ -261,14 +281,20 @@ def load_cache_on_demand():
     if EMBEDDINGS_CACHE is None:
         print("Loading cache on-demand...")
         
-        # Use BACH 4-CLASS cache (BreakHis binary + BACH 4-class supervision)
-        bach_4class_path = "/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl"
-        if os.path.exists(bach_4class_path):
-            print(f"🎯 Loading BACH 4-CLASS cache (optimized supervision)")
-            with open(bach_4class_path, 'rb') as f:
+        # Use L2 REPROCESSED cache (consistent preprocessing with new pipeline)
+        l2_reprocessed_path = "/workspace/embeddings_cache_L2_REPROCESSED.pkl"
+        if os.path.exists(l2_reprocessed_path):
+            print(f"🎯 Loading L2 REPROCESSED cache (consistent preprocessing)")
+            with open(l2_reprocessed_path, 'rb') as f:
                 EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"✅ BACH 4-CLASS cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-            print(f"📊 BreakHis: binary separation, BACH: 4-class (Normal|Benign|InSitu|Invasive)")
+            print(f"✅ L2 REPROCESSED cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
+            print(f"📊 Consistent L2 normalization for training/inference alignment")
+        # Fallback to old cache if reprocessed not available
+        elif os.path.exists("/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl"):
+            print(f"⚠️ Falling back to old cache - preprocessing inconsistency!")
+            with open("/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl", 'rb') as f:
+                EMBEDDINGS_CACHE = pickle.load(f)
+            print(f"🔄 OLD cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
         elif os.path.exists("/workspace/embeddings_cache_DATASET_SPECIFIC.pkl"):
             print(f"🔄 Loading dataset-specific cache (binary supervision)")
             with open("/workspace/embeddings_cache_DATASET_SPECIFIC.pkl", 'rb') as f:
@@ -1290,6 +1316,7 @@ async def single_image_analysis(request: AnalyzeRequest):
         
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
         print(traceback.format_exc())
         return {"status": "error", "error": str(e)}
 

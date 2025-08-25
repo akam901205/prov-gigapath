@@ -25,6 +25,7 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import LabelEncoder, normalize
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_curve, auc
+from preprocessing_pipeline import preprocessor, detect_image_scale
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -139,7 +140,7 @@ def load_embeddings_cache():
     if not model_cache.models_loaded['cache']:
         print("🔥 Loading embeddings cache...")
         try:
-            cache_path = "/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl"
+            cache_path = "/workspace/embeddings_cache_L2_REPROCESSED.pkl"
             with open(cache_path, 'rb') as f:
                 model_cache.embeddings_cache = pickle.load(f)
             
@@ -155,9 +156,9 @@ def load_embeddings_cache():
 def load_breakhis_models():
     """Load BreakHis binary classification models"""
     if not model_cache.models_loaded['breakhis']:
-        print("🔥 Loading BreakHis binary models...")
+        print("🔥 Loading BreakHis binary models (L2 retrained)...")
         try:
-            with open('/workspace/breakhis_binary_model.pkl', 'rb') as f:
+            with open('/workspace/breakhis_binary_model_L2_RETRAINED.pkl', 'rb') as f:
                 data = pickle.load(f)
             
             model_cache.breakhis_lr = data['lr_model']
@@ -176,9 +177,9 @@ def load_breakhis_models():
 def load_normal_benign_models():
     """Load BACH normal vs benign models"""
     if not model_cache.models_loaded['normal_benign']:
-        print("🟦 Loading BACH Normal vs Benign models...")
+        print("🟦 Loading BACH Normal vs Benign models (L2 retrained)...")
         try:
-            with open('/workspace/bach_normal_benign_model.pkl', 'rb') as f:
+            with open('/workspace/bach_normal_benign_model_L2_RETRAINED.pkl', 'rb') as f:
                 data = pickle.load(f)
             
             model_cache.normal_benign_lr = data['lr_model']
@@ -197,9 +198,9 @@ def load_normal_benign_models():
 def load_invasive_insitu_models():
     """Load BACH invasive vs insitu models"""
     if not model_cache.models_loaded['invasive_insitu']:
-        print("🟪 Loading BACH Invasive vs InSitu models...")
+        print("🟪 Loading BACH Invasive vs InSitu models (L2 retrained)...")
         try:
-            with open('/workspace/bach_invasive_insitu_model.pkl', 'rb') as f:
+            with open('/workspace/bach_invasive_insitu_model_L2_RETRAINED.pkl', 'rb') as f:
                 data = pickle.load(f)
             
             model_cache.invasive_insitu_lr = data['lr_model']
@@ -416,29 +417,30 @@ async def tiered_single_image_analysis(request: AnalyzeRequest):
         if "image_base64" not in input_data or not input_data["image_base64"]:
             raise HTTPException(status_code=400, detail="image_base64 is required")
         
-        # Extract GigaPath features with proper device management
-        print("🔥 Extracting GigaPath features...")
+        # Complete 7-Step Preprocessing Pipeline
+        print("🔬 Starting complete preprocessing pipeline...")
         image_data = base64.b64decode(input_data["image_base64"])
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
         
-        encoder, transform = load_gigapath_model()
+        # Get filename if provided (for scale detection)
+        filename = input_data.get("filename", "uploaded_image.jpg")
         
-        # Ensure consistent device usage
-        device = next(encoder.parameters()).device  # Get actual model device
-        print(f"🔥 Model device: {device}")
+        # Load GigaPath model
+        encoder, _ = load_gigapath_model()
         
-        input_tensor = transform(image).unsqueeze(0).to(device)
-        print(f"🔥 Input tensor device: {input_tensor.device}")
+        # Run complete preprocessing pipeline
+        l2_features, preprocessing_metadata = preprocessor.complete_pipeline(
+            image=image,
+            gigapath_model=encoder,
+            source_um_per_pixel=detect_image_scale(image, filename),
+            apply_tissue_mask=True,
+            apply_stain_norm=True
+        )
         
-        with torch.no_grad():
-            output = encoder(input_tensor)
-            # Ensure output is moved to CPU for numpy conversion
-            features = output.cpu().numpy().flatten()
+        print(f"✅ Complete preprocessing pipeline executed: {len(preprocessing_metadata['pipeline_steps'])} steps")
         
-        print(f"✅ Features extracted: {features.shape} on device: {output.device} → CPU")
-        
-        # Core Tiered Prediction System
-        tiered_results = run_tiered_prediction(features)
+        # Core Tiered Prediction System  
+        tiered_results = run_tiered_prediction(l2_features)
         
         if not tiered_results:
             raise ValueError("Tiered prediction system failed")
@@ -449,13 +451,16 @@ async def tiered_single_image_analysis(request: AnalyzeRequest):
             "tiered_prediction": tiered_results,
             "features": {
                 "encoder_type": "tile",
-                "features_shape": list(features.shape),
-                "device": str(device)
+                "features_shape": list(l2_features.shape),
+                "feature_dimension": l2_features.shape[0],
+                "normalization": "l2"
             },
+            "preprocessing": preprocessing_metadata,
             "system_info": {
                 "api_version": "3.0.0",
-                "prediction_method": "tiered_clinical_system",
-                "models_loaded": model_cache.models_loaded
+                "prediction_method": "tiered_clinical_system_with_preprocessing",
+                "models_loaded": model_cache.models_loaded,
+                "pipeline_steps": len(preprocessing_metadata['pipeline_steps'])
             }
         }
         
@@ -473,4 +478,4 @@ async def tiered_single_image_analysis(request: AnalyzeRequest):
 
 if __name__ == "__main__":
     print("🚀 Starting GigaPath Tiered Clinical API...")
-    uvicorn.run(app, host="0.0.0.0", port=8006)
+    uvicorn.run(app, host="0.0.0.0", port=8008)

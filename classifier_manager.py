@@ -4,6 +4,7 @@ Provides isolated prediction functions with robust error handling
 """
 
 import traceback
+import os
 from bach_logistic_classifier import BACHLogisticClassifier
 from breakhis_binary_classifier import BreakHisBinaryClassifier
 from bach_normal_benign_classifier import BACHNormalBenignClassifier
@@ -25,10 +26,20 @@ class ClassifierManager:
         if not self._bach_loaded:
             try:
                 print("🔥 Loading BACH classifier...")
-                self.bach_classifier = BACHLogisticClassifier()
-                success = self.bach_classifier.load_model()
+                self.bach_classifier = BACHLogisticClassifier(cache_file='/workspace/embeddings_cache_L2_REPROCESSED.pkl')
+                
+                # Try retrained model first
+                retrained_path = '/workspace/bach_logistic_model_L2_RETRAINED.pkl'
+                fallback_path = '/workspace/bach_logistic_model.pkl'
+                
+                if os.path.exists(retrained_path):
+                    success = self.bach_classifier.load_model(retrained_path)
+                    print(f"🔥 Using L2 RETRAINED BACH model: {success}")
+                else:
+                    success = self.bach_classifier.load_model(fallback_path)
+                    print(f"🔥 Using OLD BACH model: {success}")
+                
                 self._bach_loaded = success
-                print(f"🔥 BACH classifier loaded: {success}")
                 if success:
                     print(f"🔥 BACH classes: {self.bach_classifier.class_names}")
                     print(f"🔥 BACH models available: LR={self.bach_classifier.model is not None}, SVM={self.bach_classifier.svm_model is not None}, XGB={hasattr(self.bach_classifier, 'xgb_model') and self.bach_classifier.xgb_model is not None}")
@@ -42,10 +53,20 @@ class ClassifierManager:
         if not self._breakhis_loaded:
             try:
                 print("🔥 Loading BreakHis classifier...")
-                self.breakhis_classifier = BreakHisBinaryClassifier()
-                success = self.breakhis_classifier.load_model()
+                self.breakhis_classifier = BreakHisBinaryClassifier(cache_file='/workspace/embeddings_cache_L2_REPROCESSED.pkl')
+                
+                # Try retrained model first
+                retrained_path = '/workspace/breakhis_binary_model_L2_RETRAINED.pkl'
+                fallback_path = '/workspace/breakhis_binary_model.pkl'
+                
+                if os.path.exists(retrained_path):
+                    success = self.breakhis_classifier.load_model(retrained_path)
+                    print(f"🔥 Using L2 RETRAINED BreakHis model: {success}")
+                else:
+                    success = self.breakhis_classifier.load_model(fallback_path)
+                    print(f"🔥 Using OLD BreakHis model: {success}")
+                
                 self._breakhis_loaded = success
-                print(f"🔥 BreakHis classifier loaded: {success}")
                 if success:
                     print(f"🔥 BreakHis classes: {self.breakhis_classifier.class_names}")
                     print(f"🔥 BreakHis models available: LR={self.breakhis_classifier.lr_model is not None}, SVM={self.breakhis_classifier.svm_model is not None}, XGB={hasattr(self.breakhis_classifier, 'xgb_model') and self.breakhis_classifier.xgb_model is not None}")
@@ -59,10 +80,20 @@ class ClassifierManager:
         if not self._normal_benign_loaded:
             try:
                 print("🟦 Loading SPECIALIZED BACH Normal vs Benign classifier...")
-                self.bach_normal_benign_classifier = BACHNormalBenignClassifier()
-                success = self.bach_normal_benign_classifier.load_model()
+                self.bach_normal_benign_classifier = BACHNormalBenignClassifier(cache_file='/workspace/embeddings_cache_L2_REPROCESSED.pkl')
+                
+                # Try retrained model first
+                retrained_path = '/workspace/bach_normal_benign_model_L2_RETRAINED.pkl'
+                fallback_path = '/workspace/bach_normal_benign_model.pkl'
+                
+                if os.path.exists(retrained_path):
+                    success = self.bach_normal_benign_classifier.load_model(retrained_path)
+                    print(f"🟦 Using L2 RETRAINED Normal vs Benign model: {success}")
+                else:
+                    success = self.bach_normal_benign_classifier.load_model(fallback_path)
+                    print(f"🟦 Using OLD Normal vs Benign model: {success}")
+                
                 self._normal_benign_loaded = success
-                print(f"🟦 SPECIALIZED Normal vs Benign classifier loaded: {success}")
                 if success:
                     print(f"🟦 Normal vs Benign model classes: {self.bach_normal_benign_classifier.class_names}")
             except Exception as e:
@@ -77,10 +108,20 @@ class ClassifierManager:
         if not self._invasive_insitu_loaded:
             try:
                 print("🟪 Loading SPECIALIZED BACH Invasive vs InSitu classifier...")
-                self.bach_invasive_insitu_classifier = BACHInvasiveInsituClassifier()
-                success = self.bach_invasive_insitu_classifier.load_model()
+                self.bach_invasive_insitu_classifier = BACHInvasiveInsituClassifier(cache_file='/workspace/embeddings_cache_L2_REPROCESSED.pkl')
+                
+                # Try retrained model first
+                retrained_path = '/workspace/bach_invasive_insitu_model_L2_RETRAINED.pkl'
+                fallback_path = '/workspace/bach_invasive_insitu_model.pkl'
+                
+                if os.path.exists(retrained_path):
+                    success = self.bach_invasive_insitu_classifier.load_model(retrained_path)
+                    print(f"🟪 Using L2 RETRAINED Invasive vs InSitu model: {success}")
+                else:
+                    success = self.bach_invasive_insitu_classifier.load_model(fallback_path)
+                    print(f"🟪 Using OLD Invasive vs InSitu model: {success}")
+                
                 self._invasive_insitu_loaded = success
-                print(f"🟪 SPECIALIZED Invasive vs InSitu classifier loaded: {success}")
                 if success:
                     print(f"🟪 Invasive vs InSitu model classes: {self.bach_invasive_insitu_classifier.class_names}")
             except Exception as e:
