@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'https://8v9wob2mln55to-8008.proxy.runpod.net'
+const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'https://8v9wob2mln55to-8006.proxy.runpod.net'
 
 export async function POST(request: NextRequest) {
   try {

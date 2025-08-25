@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Upload, Brain, Target, Search, FileText, AlertCircle, CheckCircle, XCircle } from 'lucide-react'
 import axios from 'axios'
 import { CustomUMAP } from '@/components/CustomUMAP'
+import { TieredPredictionDisplay } from '@/components/TieredPredictionDisplay'
 
 interface AnalysisResult {
   image_filename: string
@@ -67,6 +68,7 @@ interface AnalysisResult {
         classes: string[]
         test_accuracy_lr: number
         test_accuracy_svm: number
+        test_accuracy_xgb?: number
       }
     }
     roc_plot_base64?: string
@@ -76,6 +78,32 @@ interface AnalysisResult {
       cv_accuracy: number
       cv_std: number
     }
+  }
+  tiered_prediction?: {
+    stage_1_breakhis: {
+      consensus: string
+      vote_breakdown: { malignant: number, benign: number }
+      total_classifiers: number
+      classifiers: {
+        logistic_regression: any
+        svm_rbf: any
+        xgboost: any
+      }
+    }
+    stage_2_bach_specialized: {
+      task: string
+      consensus: string
+      vote_breakdown: any
+      total_classifiers: number
+      classifiers: {
+        logistic_regression: any
+        svm_rbf: any
+        xgboost: any
+      }
+    }
+    tiered_final_prediction: string
+    clinical_pathway: string
+    system_status: string
   }
   verdict: {
     final_prediction: string
@@ -576,7 +604,27 @@ export default function SingleImageAnalysisPage() {
                   <div>
                     <h3 className="text-2xl font-bold mb-4">GigaPath Foundation Model</h3>
                     
-                    {/* Logistic Regression Prediction */}
+                    {/* NEW: Tiered Clinical Prediction System */}
+                    <div className="mb-8 p-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl">
+                      <div className="bg-white rounded-lg p-6">
+                        <div className="flex items-center gap-3 mb-4">
+                          <div className="bg-blue-600 rounded-full p-2">
+                            <Brain className="w-6 h-6 text-white" />
+                          </div>
+                          <div>
+                            <h4 className="text-xl font-bold text-gray-900">🏥 Tiered Clinical Prediction System</h4>
+                            <p className="text-blue-600 font-medium">Two-stage hierarchical classification</p>
+                          </div>
+                        </div>
+                        <TieredPredictionDisplay tieredPrediction={analysisResult?.tiered_prediction} />
+                      </div>
+                    </div>
+                    
+                    {/* Original GigaPath Classifiers */}
+                    <div className="border-t pt-6">
+                      <h4 className="text-lg font-semibold mb-4 text-gray-700">Individual Classifier Results</h4>
+                      
+                      {/* Logistic Regression Prediction */}
                     <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-6 mb-6">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -624,31 +672,6 @@ export default function SingleImageAnalysisPage() {
                       </div>
                     )}
 
-                    {/* XGBoost Classifier */}
-                    {analysisResult?.gigapath_verdict?.xgboost && (
-                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-6 mb-6">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <Brain className="w-8 h-8 text-purple-600" />
-                            <div>
-                              <h4 className="text-xl font-bold text-gray-900">
-                                XGBoost: {analysisResult.gigapath_verdict.xgboost.predicted_class?.toUpperCase() || 'PROCESSING'}
-                              </h4>
-                              <p className="text-purple-600 font-medium">
-                                Gradient Boosting Classifier
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-2xl font-bold text-purple-600">
-                              {analysisResult.gigapath_verdict.xgboost.confidence ? (analysisResult.gigapath_verdict.xgboost.confidence * 100).toFixed(1) : '0.0'}%
-                            </div>
-                            <div className="text-sm text-gray-600">XGBoost Confidence</div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
                     {/* SVM Class Probabilities */}
                     {analysisResult?.gigapath_verdict?.svm_rbf?.probabilities && (
                       <div className="bg-white rounded-lg p-6 shadow-sm border mb-6">
@@ -678,6 +701,31 @@ export default function SingleImageAnalysisPage() {
                               </div>
                             </div>
                           ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* XGBoost Classifier */}
+                    {analysisResult?.gigapath_verdict?.xgboost && (
+                      <div className="bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl p-6 mb-6">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <Brain className="w-8 h-8 text-purple-600" />
+                            <div>
+                              <h4 className="text-xl font-bold text-gray-900">
+                                XGBoost: {analysisResult.gigapath_verdict.xgboost.predicted_class?.toUpperCase() || 'PROCESSING'}
+                              </h4>
+                              <p className="text-purple-600 font-medium">
+                                Gradient Boosting Classifier
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-2xl font-bold text-purple-600">
+                              {analysisResult.gigapath_verdict.xgboost.confidence ? (analysisResult.gigapath_verdict.xgboost.confidence * 100).toFixed(1) : '0.0'}%
+                            </div>
+                            <div className="text-sm text-gray-600">XGBoost Confidence</div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -736,6 +784,8 @@ export default function SingleImageAnalysisPage() {
                               <div className="text-xs text-gray-600">Non-linear RBF kernel</div>
                             </div>
                           </div>
+                          
+                          {/* XGBoost Comparison Box */}
                           {analysisResult?.gigapath_verdict?.xgboost && (
                             <div className="bg-purple-50 rounded-lg p-4 border border-purple-200">
                               <h5 className="font-medium text-purple-700 mb-2">XGBoost</h5>
@@ -950,6 +1000,8 @@ export default function SingleImageAnalysisPage() {
                         </div>
                       </div>
                     </div>
+                    </div>
+                    {/* End of Original GigaPath Classifiers */}
                   </div>
                 )}
 

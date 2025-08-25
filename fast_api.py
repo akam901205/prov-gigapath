@@ -10,6 +10,7 @@ import base64
 from correlation_utils import calculate_correlation_predictions
 from bach_logistic_classifier import BACHLogisticClassifier
 from breakhis_binary_classifier import BreakHisBinaryClassifier
+from classifier_manager import classifier_manager
 import io
 import pickle
 import torch
@@ -788,6 +789,20 @@ async def single_image_analysis(request: AnalyzeRequest):
         # Prepare normalized features for both classifiers
         l2_features_for_classifier = new_features / np.linalg.norm(new_features)
         
+        # Run tiered prediction system
+        print("🏥 Running tiered prediction system...")
+        try:
+            tiered_results = classifier_manager.predict_tiered(l2_features_for_classifier)
+            print(f"🏥 Tiered results received: {tiered_results is not None}")
+            if tiered_results:
+                print(f"🏥 Stage 1 consensus: {tiered_results.get('stage_1_breakhis', {}).get('consensus', 'N/A')}")
+                print(f"🏥 Stage 2 task: {tiered_results.get('stage_2_bach_specialized', {}).get('task', 'N/A') if tiered_results.get('stage_2_bach_specialized') else 'NOT DEPLOYED'}")
+        except Exception as e:
+            print(f"❌ Tiered prediction failed: {e}")
+            import traceback
+            traceback.print_exc()
+            tiered_results = None
+        
         # REAL BACH LOGISTIC REGRESSION CLASSIFIER
         # Load and use the actual trained BACH classifier
         bach_classifier_result = None
@@ -1231,6 +1246,9 @@ async def single_image_analysis(request: AnalyzeRequest):
                     "feature_activation": float(confidence)                                  # Neural activation strength
                 }
             },
+            # Tiered Clinical Prediction System
+            # Stage 1: BreakHis binary → Stage 2: Specialized BACH binary
+            "tiered_prediction": tiered_results,
             "image_filename": "uploaded_image.jpg",
             "verdict": {
                 "final_prediction": final_prediction,
