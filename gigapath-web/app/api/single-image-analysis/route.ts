@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'http://localhost:8001'
 
+// Configure route for long-running operations
+export const maxDuration = 900 // 15 minutes
+export const dynamic = 'force-dynamic'
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -29,13 +33,20 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 900000) // 15 minutes
+    
     const response = await fetch(`${SINGLE_IMAGE_API_URL}/api/single-image-analysis`, {
       method: 'POST',
       body: JSON.stringify(requestPayload),
       headers: {
         'Content-Type': 'application/json',
-      }
+      },
+      signal: controller.signal,
+      keepalive: true
     })
+    
+    clearTimeout(timeoutId)
 
     if (!response.ok) {
       const errorText = await response.text()

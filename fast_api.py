@@ -931,7 +931,7 @@ async def single_image_analysis(request: AnalyzeRequest):
         
         # Process stain-normalized image through GigaPath
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        input_tensor = transform(image).to(device)
+        input_tensor = transform(image).unsqueeze(0).to(device)  # Add batch dimension
         
         with torch.no_grad():
             output = encoder(input_tensor)
@@ -1451,10 +1451,10 @@ async def single_image_analysis(request: AnalyzeRequest):
                 }
             },
             "features": {
-                "encoder_type": "tile",
-                "features_shape": list(output.shape),
+                "encoder_type": "tile", 
+                "features_shape": list(new_features.shape),
                 "features": new_features.tolist(),
-                "device": str(device)
+                "device": "cuda"
             }
         }
         

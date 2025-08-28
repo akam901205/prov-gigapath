@@ -194,7 +194,9 @@ export default function SingleImageAnalysisPage() {
       setCurrentStep('Running GigaPath analysis...')
       const response = await axios.post('/api/single-image-analysis', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 600000 // 10 minutes for larger files
+        timeout: 900000, // 15 minutes for GigaPath processing
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
       })
 
       setAnalysisResult(response.data)
@@ -202,7 +204,8 @@ export default function SingleImageAnalysisPage() {
       setCurrentStep('Analysis complete!')
     } catch (error) {
       console.error('Analysis failed:', error)
-      alert('Analysis failed. Please try again.')
+      console.error('Error details:', error.response?.data || error.message)
+      alert(`Analysis failed: ${error.response?.data?.error || error.message || 'Unknown error'}`)
     } finally {
       setIsAnalyzing(false)
     }
