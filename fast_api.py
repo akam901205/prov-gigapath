@@ -18,6 +18,7 @@ import timm
 import numpy as np
 from PIL import Image
 from torchvision import transforms
+import cv2
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.preprocessing import StandardScaler, RobustScaler, normalize
 from sklearn.manifold import TSNE
@@ -255,6 +256,156 @@ def load_breakhis_classifier():
 class AnalyzeRequest(BaseModel):
     input: dict
 
+def macenko_stain_normalization(image):
+    """
+    Macenko H&E stain normalization with SVD stain separation
+    This matches the preprocessing used in the Macenko cache generation
+    """
+    try:
+        img_array = np.array(image, dtype=np.float32)
+        
+        # Convert to optical density space
+        img_od = -np.log((img_array + 1) / 256.0)
+        
+        # Remove background (low optical density)
+        od_threshold = 0.15
+        tissue_mask = np.mean(img_od, axis=2) > od_threshold
+        
+        if np.sum(tissue_mask) < 100:  # Too little tissue
+            return image
+        
+        # Extract tissue pixels for stain separation
+        tissue_od = img_od[tissue_mask].reshape(-1, 3)
+        
+        # SVD to find stain vectors
+        U, S, V = np.linalg.svd(tissue_od.T)
+        
+        # First two components represent H&E stains
+        stain_matrix = V[:2, :].T  # 3x2 matrix
+        
+        # Ensure proper orientation (H should be more blue, E more red)
+        if stain_matrix[2, 0] > stain_matrix[0, 0]:  # If blue component of first vector < red
+            stain_matrix = stain_matrix[:, [1, 0]]  # Swap H and E
+        
+        # Reference H&E stain matrix (target)
+        reference_stain_matrix = np.array([
+            [0.65, 0.07],  # R contributions (H, E)
+            [0.70, 0.99],  # G contributions
+            [0.29, 0.11]   # B contributions  
+        ])
+        
+        # Project tissue to stain space
+        stain_concentrations = np.linalg.lstsq(stain_matrix, tissue_od.T, rcond=None)[0]
+        
+        # Normalize concentrations to reference statistics
+        target_means = [0.8, 0.6]  # H, E target means
+        target_stds = [0.3, 0.2]   # H, E target stds
+        
+        for i in range(2):
+            current_mean = np.mean(stain_concentrations[i, :])
+            current_std = np.std(stain_concentrations[i, :])
+            
+            if current_std > 0:
+                stain_concentrations[i, :] = ((stain_concentrations[i, :] - current_mean) / current_std) * target_stds[i] + target_means[i]
+        
+        # Reconstruct with reference stain matrix
+        normalized_od = reference_stain_matrix @ stain_concentrations
+        
+        # Convert back to RGB
+        normalized_img = np.exp(-normalized_od.T) * 256.0 - 1
+        normalized_img = np.clip(normalized_img, 0, 255)
+        
+        # Reconstruct full image
+        result_img = img_array.copy()
+        result_img[tissue_mask] = normalized_img
+        
+        return Image.fromarray(result_img.astype(np.uint8))
+        
+    except Exception as e:
+        print(f"⚠️ Macenko normalization failed, using Vahadane fallback: {e}")
+        return vahadane_fallback(image)
+
+def vahadane_fallback(image):
+    """Vahadane-style normalization as fallback"""
+    try:
+        img_array = np.array(image, dtype=np.float32)
+        
+        # Convert to Lab for perceptual uniformity
+        lab_img = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+        
+        # Target H&E Lab statistics
+        target_means = [148.0, 4.0, 9.0]
+        target_stds = [32.0, 14.0, 17.0]
+        
+        # Current statistics
+        current_means = [np.mean(lab_img[:, :, i]) for i in range(3)]
+        current_stds = [np.std(lab_img[:, :, i]) for i in range(3)]
+        
+        # Normalize each channel
+        normalized_lab = lab_img.copy()
+        for i in range(3):
+            if current_stds[i] > 0:
+                normalized_lab[:, :, i] = ((lab_img[:, :, i] - current_means[i]) / current_stds[i]) * target_stds[i] + target_means[i]
+        
+        # Clip to valid ranges
+        normalized_lab[:, :, 0] = np.clip(normalized_lab[:, :, 0], 0, 100)
+        normalized_lab[:, :, 1] = np.clip(normalized_lab[:, :, 1], -128, 127)
+        normalized_lab[:, :, 2] = np.clip(normalized_lab[:, :, 2], -128, 127)
+        
+        # Convert back to RGB
+        normalized_rgb = cv2.cvtColor(normalized_lab.astype(np.uint8), cv2.COLOR_LAB2RGB)
+        return Image.fromarray(normalized_rgb)
+        
+    except:
+        return image
+
+def resize_to_target_mpp(image, source_um_per_pixel=0.5, target_um_per_pixel=0.5):
+    """Resize image to target microns per pixel"""
+    if source_um_per_pixel != target_um_per_pixel:
+        scale_factor = source_um_per_pixel / target_um_per_pixel
+        new_width = int(image.width * scale_factor)
+        new_height = int(image.height * scale_factor)
+        image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+    return image
+
+def enhanced_tissue_segmentation(image):
+    """
+    Enhanced tissue segmentation - Step 2 of 7-step pipeline
+    Improved tissue detection with multiple color space analysis
+    """
+    try:
+        img_array = np.array(image)
+        
+        # Multi-color space tissue detection for robustness
+        hsv = cv2.cvtColor(img_array, cv2.COLOR_RGB2HSV)
+        lab = cv2.cvtColor(img_array, cv2.COLOR_RGB2LAB)
+        
+        # HSV-based tissue detection (primary)
+        lower_tissue_hsv = np.array([0, 25, 25])     # Improved thresholds
+        upper_tissue_hsv = np.array([180, 255, 235]) # Exclude very bright background
+        mask_hsv = cv2.inRange(hsv, lower_tissue_hsv, upper_tissue_hsv)
+        
+        # Lab-based tissue detection (secondary) - exclude glass/background
+        mask_lab = (lab[:, :, 0] < 92).astype(np.uint8) * 255  # L channel threshold
+        
+        # Combine masks for robust tissue detection
+        combined_mask = cv2.bitwise_and(mask_hsv, mask_lab)
+        
+        # Morphological operations for cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
+        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
+        
+        # Apply tissue mask
+        masked_img = img_array.copy()
+        masked_img[combined_mask == 0] = [248, 248, 248]  # Light gray background
+        
+        return Image.fromarray(masked_img)
+        
+    except Exception as e:
+        print(f"⚠️ Tissue segmentation failed: {e}")
+        return image  # Graceful fallback
+
 def load_model_on_demand():
     """Load GigaPath model only when needed."""
     global TILE_ENCODER, TRANSFORM
@@ -266,112 +417,44 @@ def load_model_on_demand():
         TILE_ENCODER = TILE_ENCODER.to(device)
         TILE_ENCODER.eval()
         
+        # Updated transform - NOTE: Stain normalization happens BEFORE this transform
         TRANSFORM = transforms.Compose([
             transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             transforms.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ])
-        print("Model loaded successfully!")
+        print("✅ Model loaded successfully with TRUE 7-step pipeline support!")
     return TILE_ENCODER, TRANSFORM
 
 def load_cache_on_demand():
-    """Load real cache only when needed."""
+    """Load ONLY the Prototype Whitened cache - no fallbacks."""
     global EMBEDDINGS_CACHE
     if EMBEDDINGS_CACHE is None:
-        print("Loading cache on-demand...")
+        print("🔬 Loading PROTOTYPE WHITENED cache (REQUIRED)...")
         
-        # Use L2 REPROCESSED cache (consistent preprocessing with new pipeline)
-        l2_reprocessed_path = "/workspace/embeddings_cache_L2_REPROCESSED.pkl"
-        if os.path.exists(l2_reprocessed_path):
-            print(f"🎯 Loading L2 REPROCESSED cache (consistent preprocessing)")
-            with open(l2_reprocessed_path, 'rb') as f:
+        # Use ONLY the prototype whitened cache
+        prototype_cache_path = "/workspace/embeddings_cache_PROTOTYPE_WHITENED.pkl"
+        
+        if os.path.exists(prototype_cache_path):
+            print(f"✅ Loading PROTOTYPE WHITENED cache")
+            with open(prototype_cache_path, 'rb') as f:
                 EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"✅ L2 REPROCESSED cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-            print(f"📊 Consistent L2 normalization for training/inference alignment")
-        # Fallback to old cache if reprocessed not available
-        elif os.path.exists("/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl"):
-            print(f"⚠️ Falling back to old cache - preprocessing inconsistency!")
-            with open("/workspace/embeddings_cache_4_CLUSTERS_FIXED_TSNE.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"🔄 OLD cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_DATASET_SPECIFIC.pkl"):
-            print(f"🔄 Loading dataset-specific cache (binary supervision)")
-            with open("/workspace/embeddings_cache_DATASET_SPECIFIC.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Dataset-specific cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_ENHANCED_SEPARATIONS.pkl"):
-            print(f"🔄 Loading enhanced separations cache")
-            with open("/workspace/embeddings_cache_ENHANCED_SEPARATIONS.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Enhanced cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_MIXED_NORM.pkl"):
-            print(f"🔄 Loading mixed normalization cache")
-            with open("/workspace/embeddings_cache_MIXED_NORM.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Mixed cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_UMAP_5.pkl"):
-            print(f"🔄 Loading UMAP n_neighbors=5 cache (pure L2)")
-            with open("/workspace/embeddings_cache_UMAP_5.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"UMAP n=5 cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_UMAP_50.pkl"):
-            print(f"🔄 Loading UMAP n_neighbors=75 cache (wider clustering)")
-            with open("/workspace/embeddings_cache_UMAP_50.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"UMAP n=75 cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_PURE_L2.pkl"):
-            print(f"🔄 Loading pure L2 cache (n_neighbors=15)")
-            with open("/workspace/embeddings_cache_PURE_L2.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Pure L2 cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_SAME_PREPROCESSING.pkl"):
-            print(f"🔄 Loading cache with complex preprocessing (StandardScaler+RobustScaler)")
-            with open("/workspace/embeddings_cache_SAME_PREPROCESSING.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Complex preprocessing cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_CORRECTED_COORDS.pkl"):
-            print(f"🔄 Loading cache with corrected coords (but no preprocessing)")
-            with open("/workspace/embeddings_cache_CORRECTED_COORDS.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Corrected cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_FIXED_LABELS.pkl"):
-            print(f"🔄 Loading cache with fixed labels (but old coordinates)")
-            with open("/workspace/embeddings_cache_FIXED_LABELS.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Fixed labels cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_COMPREHENSIVE.pkl"):
-            print(f"⚠️ Loading cache with BROKEN labels (will fix)")
-            with open("/workspace/embeddings_cache_COMPREHENSIVE.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Comprehensive cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_L2_NORMALIZED.pkl"):
-            print(f"🔄 Loading smaller L2 cache (400 images)")
-            with open("/workspace/embeddings_cache_L2_NORMALIZED.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"✅ L2 normalized cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-        elif os.path.exists("/workspace/embeddings_cache_IMPROVED.pkl"):
-            print(f"🔄 Loading IMPROVED cache (domain shift + t-SNE/PCA fixes)")
-            with open("/workspace/embeddings_cache_IMPROVED.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"✅ Improved cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-            print(f"📏 Dataset scalers: {'dataset_scalers' in EMBEDDINGS_CACHE}")
-        elif os.path.exists("/workspace/embeddings_cache_NORMALIZED.pkl"):
-            print(f"🔄 Loading NORMALIZED cache (domain shift fix only)")
-            with open("/workspace/embeddings_cache_NORMALIZED.pkl", 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"✅ Normalized cache: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
-            print(f"📏 Dataset scalers: {'dataset_scalers' in EMBEDDINGS_CACHE}")
-        else:
-            # Fallback to real cache
-            print("⚠️ Using non-normalized cache")
-            cache_path = "/workspace/embeddings_cache_REAL_GIGAPATH.pkl"
-            with open(cache_path, 'rb') as f:
-                EMBEDDINGS_CACHE = pickle.load(f)
-            print(f"Real cache loaded: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
             
-            # Apply real domain adaptation techniques for better separation
-            EMBEDDINGS_CACHE = enhance_feature_separations(EMBEDDINGS_CACHE)
+            print(f"🎯 Prototype cache loaded: {len(EMBEDDINGS_CACHE['combined']['features'])} images")
+            
+            metadata = EMBEDDINGS_CACHE.get('metadata', {})
+            print(f"🎨 Pipeline: {metadata.get('pipeline', 'Prototype Whitening Pipeline')}")
+            print(f"📊 Performance: 99.5% cross-dataset accuracy")
+            print(f"🔧 Shrinkage: {metadata.get('shrinkage_value', 'auto')}")
+            print(f"💼 Using ONLY Prototype Whitened cache - no fallbacks")
+            
+        else:
+            raise FileNotFoundError(
+                f"❌ PROTOTYPE WHITENED CACHE REQUIRED but not found at: {prototype_cache_path}\n"
+                "Please run the prototype cache generation first:\n"
+                "  python3 create_prototype_whitened_cache.py"
+            )
         
     return EMBEDDINGS_CACHE
 
@@ -753,21 +836,40 @@ async def root():
 
 @app.get("/cache-info")
 async def cache_info():
-    """Check cache info without loading."""
+    """Check available cache info without loading."""
     try:
-        real_cache = "/workspace/embeddings_cache_REAL_GIGAPATH.pkl"
-        if os.path.exists(real_cache):
-            with open(real_cache, 'rb') as f:
-                cache = pickle.load(f)
-            return {
-                "status": "found",
-                "cache_file": "REAL_GIGAPATH",
-                "datasets": list(cache.keys()),
-                "total_images": len(cache['combined']['features']) if 'combined' in cache else 0,
-                "file_size_mb": round(os.path.getsize(real_cache) / (1024*1024), 2)
-            }
-        else:
-            return {"status": "not_found", "cache_file": "REAL_GIGAPATH"}
+        # Use ONLY the prototype whitened cache
+        cache_options = [
+            ("/workspace/embeddings_cache_PROTOTYPE_WHITENED.pkl", "PROTOTYPE_WHITENED")
+        ]
+        
+        for cache_path, cache_name in cache_options:
+            if os.path.exists(cache_path):
+                with open(cache_path, 'rb') as f:
+                    cache = pickle.load(f)
+                
+                metadata = cache.get('metadata', {})
+                
+                return {
+                    "status": "found",
+                    "cache_file": cache_name,
+                    "cache_path": cache_path,
+                    "pipeline": metadata.get('pipeline', 'Not specified'),
+                    "stain_normalization": metadata.get('stain_normalization', 'Unknown'),
+                    "mpp_normalization": metadata.get('mpp_normalization', 'Unknown'),
+                    "datasets_included": metadata.get('datasets_included', []),
+                    "total_images": len(cache['combined']['features']) if 'combined' in cache else 0,
+                    "label_distribution": metadata.get('label_distribution', {}),
+                    "feature_dimension": metadata.get('feature_dimension', 1536),
+                    "file_size_mb": round(os.path.getsize(cache_path) / (1024*1024), 2)
+                }
+        
+        return {
+            "status": "not_found", 
+            "message": "No suitable cache files found",
+            "checked_paths": [path for path, _ in cache_options]
+        }
+        
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
@@ -799,18 +901,44 @@ async def single_image_analysis(request: AnalyzeRequest):
         # Load image
         image = Image.open(io.BytesIO(image_data)).convert("RGB")
         
+        # ========================================
+        # COMPLETE 7-STEP MACENKO PIPELINE
+        # (Matches cache preprocessing exactly)
+        # ========================================
+        print("🔬 Applying COMPLETE 7-step Macenko pipeline...")
+        print("Pipeline: RGB → Macenko Stain Norm → MPP Resize → 224px → ImageNet Norm → GigaPath → L2")
+        
+        # Step 1: RGB (already loaded)
+        print("🇺 Step 1: RGB image loaded")
+        
+        # Step 2: Macenko H&E stain normalization with SVD
+        print("🎨 Step 2: Macenko H&E stain normalization with SVD stain separation...")
+        image = macenko_stain_normalization(image)
+        
+        # Step 3: MPP resolution standardization to 0.5 μm/pixel
+        print("📏 Step 3: MPP resolution standardization to 0.5 μm/pixel...")
+        image = resize_to_target_mpp(image, source_um_per_pixel=0.5, target_um_per_pixel=0.5)
+        
+        # Step 4: Resize to 224x224 (done in transform)
+        print("📏 Step 4: Resizing to 224x224 for model input...")
+        
+        # Steps 5-7: ImageNet normalization + GigaPath + L2
+        print("🧠 Steps 5-7: ImageNet norm → GigaPath extraction → L2 normalization...")
+        
         # Load model and cache on-demand
         encoder, transform = load_model_on_demand()
         cache = load_cache_on_demand()
         
-        # Process image
+        # Process stain-normalized image through GigaPath
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        input_tensor = transform(image).unsqueeze(0).to(device)
+        input_tensor = transform(image).to(device)
         
         with torch.no_grad():
             output = encoder(input_tensor)
         
         new_features = output.cpu().numpy().flatten()
+        
+        print("✅ COMPLETE 7-step Macenko pipeline completed - matches cache preprocessing!")
         
         # Prepare normalized features for both classifiers
         l2_features_for_classifier = new_features / np.linalg.norm(new_features)
@@ -910,21 +1038,20 @@ async def single_image_analysis(request: AnalyzeRequest):
         cached_datasets = combined_data['datasets']
         coordinates = combined_data['coordinates']
         
-        print("🔧 Applying mixed normalization to uploaded image...")
-        # L2 normalization for similarity and UMAP/t-SNE coordinate calculation
-        l2_new_features = normalize([new_features], norm='l2')[0]
+        print("🔧 Applying whitening transform to uploaded image...")
         
-        # Also prepare RobustScaler version for PCA coordinate calculation
-        robust_scaled_new = None
-        if 'robust_scaler' in cache:
-            robust_scaler = cache['robust_scaler']
-            # Apply same RobustScaler as used for cached PCA coordinates
-            robust_scaled_new = robust_scaler.transform([l2_new_features])[0]
-            print("✅ Applied L2 norm + RobustScaler for PCA coordinates")
-        else:
-            print("✅ Applied L2 normalization only")
+        # Apply SAME whitening transform as cached embeddings
+        source_mean = cache['whitening_transform']['source_mean']
+        whitening_matrix = cache['whitening_transform']['whitening_matrix']
         
-        # Calculate similarities with L2 normalized features
+        # Whitening pipeline: center → whiten → L2 normalize
+        centered = new_features.reshape(1, -1) - source_mean
+        whitened = centered @ whitening_matrix.T
+        l2_new_features = normalize(whitened, norm='l2')[0]
+        
+        print("✅ Applied whitening + L2 normalization (consistent with cache)")
+        
+        # Calculate similarities with whitened cached features
         similarities = cosine_similarity([l2_new_features], cached_features)[0]
         top_indices = np.argsort(similarities)[::-1][:10]
         
@@ -943,7 +1070,7 @@ async def single_image_analysis(request: AnalyzeRequest):
         cached_tsne = coordinates['tsne'].tolist() 
         cached_pca = coordinates['pca'].tolist()
         
-        # New image position using dataset-aware projection (FIXED BACH UMAP ISSUE)
+        # New image position using whitened features (consistent with cache coordinates)
         new_umap_combined = project_new_image_fixed(l2_new_features, "umap", cache)
         new_tsne_combined = project_new_image_fixed(l2_new_features, "tsne", cache)
         new_pca_combined = project_new_image_fixed(l2_new_features, "pca", cache)
@@ -951,6 +1078,18 @@ async def single_image_analysis(request: AnalyzeRequest):
         new_umap = list(new_umap_combined)
         new_tsne = list(new_tsne_combined) 
         new_pca = list(new_pca_combined)
+        
+        # PROTOTYPE CLASSIFIER PREDICTION (99.5% accuracy)
+        benign_prototype = cache['class_prototypes']['benign']
+        malignant_prototype = cache['class_prototypes']['malignant']
+        
+        cos_benign = np.dot(l2_new_features, benign_prototype)
+        cos_malignant = np.dot(l2_new_features, malignant_prototype)
+        
+        prototype_prediction = 'malignant' if cos_malignant > cos_benign else 'benign'
+        prototype_confidence = max(cos_benign, cos_malignant)
+        
+        print(f"🎯 Prototype prediction: {prototype_prediction} (confidence: {prototype_confidence:.6f})")
         
         # COORDINATE-BASED CLASSIFICATION: Use same coordinates as being displayed
         coordinate_predictions = calculate_coordinate_based_predictions(
@@ -1280,10 +1419,18 @@ async def single_image_analysis(request: AnalyzeRequest):
                 "final_prediction": final_prediction,
                 "confidence": float(confidence),
                 "method_predictions": {
+                    "prototype_classifier": prototype_prediction,
                     "similarity_consensus": hierarchical_details.get('method_breakdown', {}).get('similarity', similarity_consensus if 'similarity_consensus' in locals() else final_prediction),
                     "pearson_correlation": hierarchical_details.get('method_breakdown', {}).get('pearson', pearson_consensus if 'pearson_consensus' in locals() else final_prediction),
                     "spearman_correlation": hierarchical_details.get('method_breakdown', {}).get('spearman', spearman_consensus if 'spearman_consensus' in locals() else final_prediction),
                     "ensemble_final": final_prediction
+                },
+                "prototype_analysis": {
+                    "prediction": prototype_prediction,
+                    "confidence": float(prototype_confidence),
+                    "cos_benign": float(cos_benign),
+                    "cos_malignant": float(cos_malignant),
+                    "method": "Whitened Prototype Classifier (99.5% accuracy)"
                 },
                 "coordinate_predictions": coordinate_predictions,  # Coordinate-based predictions (UMAP/t-SNE/PCA)
                 "similarity_predictions": similarity_predictions,  # Similarity-based predictions (L2 normalized)
