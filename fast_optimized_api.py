@@ -14,6 +14,7 @@ from sklearn.preprocessing import normalize
 from sklearn.neighbors import NearestNeighbors
 import pickle
 import os
+import time
 
 # Set token
 os.environ["HF_TOKEN"] = os.getenv("HF_TOKEN", "your_hf_token_here")
@@ -210,6 +211,11 @@ async def fast_analyze_image(request: AnalyzeRequest):
         breakhis_features = CACHED_FEATURES[breakhis_indices]
         breakhis_labels = [CACHE['combined']['labels'][i] for i in breakhis_indices]
         
+        # BACH correlation analysis
+        bach_indices = [i for i, ds in enumerate(CACHE['combined']['datasets']) if ds == 'bach']
+        bach_features = CACHED_FEATURES[bach_indices]
+        bach_labels = [CACHE['combined']['labels'][i] for i in bach_indices]
+        
         # Find top BreakHis correlations
         breakhis_correlations = []
         for i, feat in enumerate(breakhis_features[:100]):  # Sample 100 for speed
@@ -227,19 +233,55 @@ async def fast_analyze_image(request: AnalyzeRequest):
             except:
                 continue
         
-        # Get top correlations for each method
+        # Find top BACH correlations
+        bach_correlations = []
+        for i, feat in enumerate(bach_features):  # Use all BACH samples (400 total)
+            try:
+                pearson_corr, _ = pearsonr(l2_features, feat)
+                spearman_corr, _ = spearmanr(l2_features, feat)
+                
+                if not np.isnan(pearson_corr) and not np.isnan(spearman_corr):
+                    bach_correlations.append({
+                        'label': bach_labels[i],
+                        'pearson': float(pearson_corr),
+                        'spearman': float(spearman_corr),
+                        'cosine': float(similarities[bach_indices[i]])
+                    })
+            except:
+                continue
+        
+        # Get top correlations for each method (BreakHis)
         if breakhis_correlations:
-            top_pearson = max(breakhis_correlations, key=lambda x: abs(x['pearson']))
-            top_spearman = max(breakhis_correlations, key=lambda x: abs(x['spearman']))
-            top_cosine = max(breakhis_correlations, key=lambda x: x['cosine'])
+            top_pearson_breakhis = max(breakhis_correlations, key=lambda x: abs(x['pearson']))
+            top_spearman_breakhis = max(breakhis_correlations, key=lambda x: abs(x['spearman']))
+            top_cosine_breakhis = max(breakhis_correlations, key=lambda x: x['cosine'])
             
-            pearson_prediction = top_pearson['label']
-            spearman_prediction = top_spearman['label']
-            cosine_prediction = top_cosine['label']
+            pearson_prediction = top_pearson_breakhis['label']
+            spearman_prediction = top_spearman_breakhis['label']
+            cosine_prediction = top_cosine_breakhis['label']
         else:
             pearson_prediction = prediction
             spearman_prediction = prediction  
             cosine_prediction = prediction
+            top_pearson_breakhis = {'pearson': 0.0}
+            top_spearman_breakhis = {'spearman': 0.0}
+        
+        # Get top correlations for BACH
+        if bach_correlations:
+            top_pearson_bach = max(bach_correlations, key=lambda x: abs(x['pearson']))
+            top_spearman_bach = max(bach_correlations, key=lambda x: abs(x['spearman']))
+            top_cosine_bach = max(bach_correlations, key=lambda x: x['cosine'])
+            
+            bach_pearson_prediction = top_pearson_bach['label']
+            bach_spearman_prediction = top_spearman_bach['label']
+            bach_cosine_prediction = top_cosine_bach['label']
+        else:
+            bach_pearson_prediction = prediction
+            bach_spearman_prediction = prediction
+            bach_cosine_prediction = prediction
+            top_pearson_bach = {'pearson': 0.0}
+            top_spearman_bach = {'spearman': 0.0}
+            top_cosine_bach = {'cosine': 0.0}
         
         # Fast coordinate projection (NN already fitted)
         distances, indices = COORD_NN.kneighbors([l2_features])
@@ -386,12 +428,65 @@ async def fast_analyze_image(request: AnalyzeRequest):
                 "correlation_predictions": {
                     "pearson": {
                         "prediction": pearson_prediction,
-                        "correlation": float(top_pearson['pearson']) if breakhis_correlations else 0.0
+                        "correlation": float(top_pearson_breakhis['pearson']) if breakhis_correlations else 0.0,
+                        "dataset_predictions": {
+                            "breakhis": {
+                                "best_match": {
+                                    "label": pearson_prediction,
+                                    "similarity": float(abs(top_pearson_breakhis['pearson'])) if breakhis_correlations else 0.0,
+                                    "filename": f"top_pearson_{pearson_prediction}"
+                                },
+                                "consensus": {
+                                    "label": pearson_prediction,
+                                    "confidence": float(abs(top_pearson_breakhis['pearson'])) if breakhis_correlations else 0.0
+                                }
+                            },
+                            "bach": {
+                                "best_match": {
+                                    "label": bach_pearson_prediction,
+                                    "similarity": float(abs(top_pearson_bach['pearson'])) if bach_correlations else 0.0,
+                                    "filename": f"top_bach_pearson_{bach_pearson_prediction}"
+                                },
+                                "consensus": {
+                                    "label": bach_pearson_prediction,
+                                    "confidence": float(abs(top_pearson_bach['pearson'])) if bach_correlations else 0.0
+                                }
+                            }
+                        }
                     },
                     "spearman": {
                         "prediction": spearman_prediction,
-                        "correlation": float(top_spearman['spearman']) if breakhis_correlations else 0.0
+                        "correlation": float(top_spearman_breakhis['spearman']) if breakhis_correlations else 0.0,
+                        "dataset_predictions": {
+                            "breakhis": {
+                                "best_match": {
+                                    "label": spearman_prediction,
+                                    "similarity": float(abs(top_spearman_breakhis['spearman'])) if breakhis_correlations else 0.0,
+                                    "filename": f"top_spearman_{spearman_prediction}"
+                                },
+                                "consensus": {
+                                    "label": spearman_prediction,
+                                    "confidence": float(abs(top_spearman_breakhis['spearman'])) if breakhis_correlations else 0.0
+                                }
+                            },
+                            "bach": {
+                                "best_match": {
+                                    "label": bach_spearman_prediction,
+                                    "similarity": float(abs(top_spearman_bach['spearman'])) if bach_correlations else 0.0,
+                                    "filename": f"top_bach_spearman_{bach_spearman_prediction}"
+                                },
+                                "consensus": {
+                                    "label": bach_spearman_prediction,
+                                    "confidence": float(abs(top_spearman_bach['spearman'])) if bach_correlations else 0.0
+                                }
+                            }
+                        }
                     }
+                },
+                "coordinate_predictions": {
+                    "umap": {"prediction": prediction, "confidence": confidence},
+                    "tsne": {"prediction": prediction, "confidence": confidence},
+                    "pca": {"prediction": prediction, "confidence": confidence}
                 }
             }
         }
