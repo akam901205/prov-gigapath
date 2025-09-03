@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 // Configure route for long-running operations - same as true-tiered
-export const maxDuration = 900 // 15 minutes
+export const maxDuration = 1800 // 30 minutes
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
@@ -29,12 +29,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Direct call to RunPod API
+    // Direct call to localhost SSH tunnel (same as true-tiered)
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 900000) // 15 minutes
+    const timeoutId = setTimeout(() => controller.abort(), 1800000) // 30 minutes
 
-    console.log('🌐 Calling RunPod SimPath API directly...')
-    const response = await fetch('https://8v9wob2mln55to-8007.proxy.runpod.net/api/simpath-analysis', {
+    console.log('🌐 Calling localhost SimPath API via SSH tunnel...')
+    const response = await fetch('http://localhost:8006/api/simpath-analysis', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

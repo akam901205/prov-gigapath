@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const SIMPATH_API_URL = process.env.GIGAPATH_DATASET_API_URL || 'https://8v9wob2mln55to-8007.proxy.runpod.net'
+const SIMPATH_API_URL = 'http://localhost:8006' // Use same port as true-tiered API
 
 // Configure route for long-running operations
-export const maxDuration = 300 // 5 minutes
+export const maxDuration = 1800 // 30 minutes - maximum allowed
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
@@ -61,10 +61,10 @@ export async function POST(request: NextRequest) {
     
     console.log(`🌐 Forwarding to RunPod API: ${SIMPATH_API_URL}`)
     
-    // Try quick response first (30 seconds)
+    // Allow much longer for large image processing (15 minutes total)
     const startTime = Date.now()
     const quickController = new AbortController()
-    const quickTimeoutId = setTimeout(() => quickController.abort(), 30000) // 30 seconds
+    const quickTimeoutId = setTimeout(() => quickController.abort(), 1800000) // 30 minutes full timeout
     
     try {
       const response = await fetch(`${SIMPATH_API_URL}/api/simpath-analysis`, {
@@ -94,18 +94,24 @@ export async function POST(request: NextRequest) {
           details: `Status ${response.status}: ${errorText}`
         }, { status: response.status })
       }
-    } catch (quickError) {
+    } catch (fetchError) {
       clearTimeout(quickTimeoutId)
-      console.log('⏰ Quick response timeout, returning processing status...')
+      console.error('❌ SimPath analysis failed:', fetchError)
       
-      // Return immediate response indicating processing is happening
+      // Return error response for actual failures
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        return NextResponse.json({
+          error: 'SimPath analysis timed out',
+          message: 'The analysis took longer than 15 minutes. Please try again with a smaller image or fewer similarity metrics.',
+          timeout: true
+        }, { status: 504 })
+      }
+      
       return NextResponse.json({
-        status: 'processing',
-        message: 'SimPath analysis is running in the background. This complex computation compares your image against 2,217 pathology samples using multiple similarity metrics. Processing typically takes 2-5 minutes.',
-        estimated_time: '2-5 minutes',
-        metrics: body?.input?.metrics || [],
-        processing: true
-      }, { status: 202 }) // 202 Accepted
+        error: 'SimPath analysis failed',
+        details: fetchError instanceof Error ? fetchError.message : 'Unknown error',
+        message: 'Failed to process the image. Please try again.'
+      }, { status: 500 })
     }
     
     // This code should not be reached due to the try-catch above
@@ -118,7 +124,7 @@ export async function POST(request: NextRequest) {
     console.error('💥 Simpath proxy error:', error)
     if (error.name === 'AbortError' || error.name === 'TimeoutError' || error.message.includes('timeout')) {
       return NextResponse.json(
-        { error: 'SimPath analysis timed out after 3 minutes. This is a complex computation comparing against 2,217 pathology samples across 8 similarity metrics. Please try with fewer metrics or wait for the system to be less busy.' },
+        { error: 'SimPath analysis timed out after 30 minutes. This is a complex computation comparing against 2,217 pathology samples across 8 similarity metrics. Please try with a smaller image or fewer metrics.' },
         { status: 504 }
       )
     }
