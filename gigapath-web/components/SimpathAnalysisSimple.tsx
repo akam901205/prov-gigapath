@@ -324,8 +324,10 @@ export default function SimpathAnalysisSimple({ imageFile, imagePreview }: Simpa
                     <th className="text-left p-3">Metric</th>
                     <th className="text-left p-3">BreakHis Best</th>
                     <th className="text-left p-3">BH Label</th>
+                    <th className="text-left p-3">BH Score</th>
                     <th className="text-left p-3">BACH Best</th>
                     <th className="text-left p-3">BACH Label</th>
+                    <th className="text-left p-3">BACH Score</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -338,12 +340,14 @@ export default function SimpathAnalysisSimple({ imageFile, imagePreview }: Simpa
                           {item.breakhis_best_match.label}
                         </span>
                       </td>
+                      <td className="p-3 font-mono text-xs">{item.breakhis_best_match.score.toFixed(4)}</td>
                       <td className="p-3 text-xs font-mono">{item.bach_best_match.filename}</td>
                       <td className="p-3">
                         <span className={`px-2 py-1 rounded text-xs ${item.bach_best_match.label === 'malignant' || item.bach_best_match.label === 'invasive' || item.bach_best_match.label === 'insitu' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
                           {item.bach_best_match.label}
                         </span>
                       </td>
+                      <td className="p-3 font-mono text-xs">{item.bach_best_match.score.toFixed(4)}</td>
                     </tr>
                   ))}
                 </tbody>
