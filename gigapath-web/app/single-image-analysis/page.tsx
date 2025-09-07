@@ -5,9 +5,38 @@ import { Upload, Brain, Target, Search, FileText, AlertCircle, CheckCircle, XCir
 import axios from 'axios'
 import { CustomUMAP } from '@/components/CustomUMAP'
 import { TieredPredictionDisplay } from '@/components/TieredPredictionDisplay'
+import TrueTieredSystem from '@/components/TrueTieredSystem'
+import SimpathAnalysisSimple from '@/components/SimpathAnalysisSimple'
 
 interface AnalysisResult {
   image_filename: string
+  // Meta Tiered System fields
+  status?: string
+  system_type?: string  // Can be 'meta_tiered' or 'optimized_meta_tiered'
+  methodology?: string
+  final_prediction?: {
+    prediction: string
+    confidence: number
+    specialist_used: string
+    method: string
+    methodology: string
+  }
+  all_specialists?: Array<{
+    name: string
+    prediction: string
+    confidence: number
+    selected: boolean
+  }>
+  routing?: {
+    methodology: string
+    specialist_selected: string
+    confidence_breakhis: number
+    confidence_bach: number
+    routing_reason: string
+    logic: string
+    champion_performance: string
+  }
+  // Original fields
   domain_invariant: {
     new_image_coordinates: { umap: [number, number], tsne: [number, number], pca: [number, number] }
     cached_coordinates: { umap: number[][], tsne: number[][], pca: number[][] }
@@ -169,8 +198,10 @@ export default function SingleImageAnalysisPage() {
     { id: 0, name: 'Domain-Invariant', icon: Brain, color: 'blue' },
     { id: 1, name: 'BreakHis Analysis', icon: Target, color: 'purple' },
     { id: 2, name: 'BACH Analysis', icon: Search, color: 'green' },
-    { id: 3, name: 'GigaPath Verdict', icon: Brain, color: 'indigo' },
-    { id: 4, name: 'Diagnostic Verdict', icon: FileText, color: 'orange' }
+    { id: 3, name: 'AI Verdict', icon: Brain, color: 'indigo' },
+    { id: 4, name: 'Meta-Tiered System', icon: Target, color: 'purple' },
+    { id: 5, name: 'Simpath', icon: Search, color: 'teal' },
+    { id: 6, name: 'Diagnostic Verdict', icon: FileText, color: 'orange' }
   ]
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,10 +222,10 @@ export default function SingleImageAnalysisPage() {
       const formData = new FormData()
       formData.append('image', selectedFile)
 
-      setCurrentStep('Running GigaPath analysis...')
+      setCurrentStep('Running pathology AI analysis...')
       const response = await axios.post('/api/single-image-analysis', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        timeout: 900000, // 15 minutes for GigaPath processing
+        timeout: 900000, // 15 minutes for AI processing
         maxContentLength: Infinity,
         maxBodyLength: Infinity
       })
@@ -234,7 +265,7 @@ export default function SingleImageAnalysisPage() {
               Single Image Diagnostic Analysis
             </h1>
             <p className="text-gray-600">
-              Upload a pathology image to analyze it using Microsoft's GigaPath foundation model
+              Upload a pathology image to analyze it using our state-of-the-art pathology AI system
             </p>
           </div>
 
@@ -605,7 +636,7 @@ export default function SingleImageAnalysisPage() {
                 {/* Tab 4: Verdict */}
                 {activeTab === 3 && (
                   <div>
-                    <h3 className="text-2xl font-bold mb-4">GigaPath Foundation Model</h3>
+                    <h3 className="text-2xl font-bold mb-4">Pathology AI Foundation Model</h3>
                     
                     {/* NEW: Tiered Clinical Prediction System */}
                     <div className="mb-8 p-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl">
@@ -622,6 +653,69 @@ export default function SingleImageAnalysisPage() {
                         <TieredPredictionDisplay tieredPrediction={analysisResult?.tiered_prediction} />
                       </div>
                     </div>
+
+                    {/* Meta Tiered System Results */}
+                    {analysisResult?.final_prediction && (
+                      <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-8 mb-8 border-2 border-emerald-200">
+                        <div className="flex items-center justify-between mb-6">
+                          <div className="flex items-center gap-4">
+                            <Target className="w-10 h-10 text-emerald-600" />
+                            <div>
+                              <h4 className="text-xl font-bold text-gray-900">🎯 Optimized Meta-Tiered System</h4>
+                              <p className="text-emerald-600 font-medium">
+                                {analysisResult.methodology || "LR-Only routing: 91.3% sensitivity, 94.8% specificity"}
+                              </p>
+                              {analysisResult.system_type === 'optimized_meta_tiered' && (
+                                <div className="mt-2 text-sm text-emerald-700">
+                                  ✨ OPTIMIZED: Balanced training + LR-only specialists
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        
+                        {/* Final Prediction Banner */}
+                        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl p-6 mb-6 text-white">
+                          <div className="text-center">
+                            <div className="text-3xl font-bold mb-2">
+                              {analysisResult.final_prediction.prediction.toUpperCase()}
+                            </div>
+                            <div className="text-emerald-100 text-lg">
+                              Confidence: {(analysisResult.final_prediction.confidence * 100).toFixed(1)}%
+                            </div>
+                            <div className="text-emerald-200 text-sm mt-2">
+                              Specialist: {analysisResult.final_prediction.specialist_used}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* All Specialists Results */}
+                        {analysisResult.all_specialists && (
+                          <div className="grid md:grid-cols-2 gap-4">
+                            {analysisResult.all_specialists.map((specialist, index) => (
+                              <div key={index} className={`p-4 rounded-lg border-2 ${specialist.selected ? 'bg-emerald-100 border-emerald-400' : 'bg-white border-gray-200'}`}>
+                                <div className="flex justify-between items-center">
+                                  <div>
+                                    <div className="font-semibold text-gray-900">{specialist.name}</div>
+                                    <div className={`text-sm font-medium ${specialist.prediction === 'malignant' ? 'text-red-600' : 'text-green-600'}`}>
+                                      {specialist.prediction.toUpperCase()}
+                                    </div>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-lg font-bold text-gray-700">
+                                      {(specialist.confidence * 100).toFixed(1)}%
+                                    </div>
+                                    {specialist.selected && (
+                                      <div className="text-emerald-600 text-xs">SELECTED</div>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     
                     {/* Original GigaPath Classifiers */}
                     <div className="border-t pt-6">
@@ -1009,6 +1103,24 @@ export default function SingleImageAnalysisPage() {
                 )}
 
                 {activeTab === 4 && (
+                  <div>
+                    <TrueTieredSystem 
+                      imageFile={selectedFile} 
+                      imagePreview={selectedFile ? URL.createObjectURL(selectedFile) : undefined}
+                    />
+                  </div>
+                )}
+
+                {activeTab === 5 && (
+                  <div>
+                    <SimpathAnalysisSimple 
+                      imageFile={selectedFile} 
+                      imagePreview={selectedFile ? URL.createObjectURL(selectedFile) : undefined}
+                    />
+                  </div>
+                )}
+
+                {activeTab === 6 && (
                   <div>
                     <h3 className="text-2xl font-bold mb-4">Diagnostic Verdict</h3>
                     

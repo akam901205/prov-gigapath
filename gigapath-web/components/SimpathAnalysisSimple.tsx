@@ -21,8 +21,18 @@ interface SimilarityResult {
 }
 
 interface SimpathResult {
-  similarity_analysis: SimilarityResult[]
-  summary: {
+  similarity_analysis: {
+    top_matches: Array<{
+      filename: string
+      label: string
+      similarity_score: number
+      dataset: string
+      metric: string
+    }>
+    metrics_used: string[]
+    total_comparisons: number
+  }
+  summary?: {
     breakhis_consensus: string
     bach_consensus: string
     most_reliable_metric: string
@@ -309,11 +319,11 @@ export default function SimpathAnalysisSimple({ imageFile, imagePreview }: Simpa
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
               <div className="bg-purple-50 p-4 rounded-lg">
                 <h4 className="font-semibold text-purple-800 mb-2">🔬 BreakHis Consensus</h4>
-                <span className="font-medium">{result.summary.breakhis_consensus}</span>
+                <span className="font-medium">{result.summary?.breakhis_consensus || 'Analysis Complete'}</span>
               </div>
               <div className="bg-green-50 p-4 rounded-lg">
                 <h4 className="font-semibold text-green-800 mb-2">🧬 BACH Consensus</h4>
-                <span className="font-medium">{result.summary.bach_consensus}</span>
+                <span className="font-medium">{result.summary?.bach_consensus || 'Similarity Search Complete'}</span>
               </div>
             </div>
 
@@ -331,23 +341,23 @@ export default function SimpathAnalysisSimple({ imageFile, imagePreview }: Simpa
                   </tr>
                 </thead>
                 <tbody>
-                  {result.similarity_analysis.map((item, idx) => (
+                  {(result.similarity_analysis?.top_matches || []).map((match, idx) => (
                     <tr key={idx} className="border-b">
-                      <td className="p-3 font-medium">{item.metric}</td>
-                      <td className="p-3 text-xs font-mono">{item.breakhis_best_match.filename}</td>
+                      <td className="p-3 font-medium">{match.metric}</td>
+                      <td className="p-3 text-xs font-mono">{match.filename}</td>
                       <td className="p-3">
-                        <span className={`px-2 py-1 rounded text-xs ${item.breakhis_best_match.label === 'malignant' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-                          {item.breakhis_best_match.label}
+                        <span className={`px-2 py-1 rounded text-xs ${match.label === 'malignant' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                          {match.label}
                         </span>
                       </td>
-                      <td className="p-3 font-mono text-xs">{item.breakhis_best_match.score.toFixed(4)}</td>
-                      <td className="p-3 text-xs font-mono">{item.bach_best_match.filename}</td>
+                      <td className="p-3 font-mono text-xs">{match.similarity_score?.toFixed(4) || 'N/A'}</td>
+                      <td className="p-3 text-xs font-mono">{match.dataset}</td>
                       <td className="p-3">
-                        <span className={`px-2 py-1 rounded text-xs ${item.bach_best_match.label === 'malignant' || item.bach_best_match.label === 'invasive' || item.bach_best_match.label === 'insitu' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
-                          {item.bach_best_match.label}
+                        <span className={`px-2 py-1 rounded text-xs ${match.label === 'malignant' || match.label === 'invasive' || match.label === 'insitu' ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
+                          {match.label}
                         </span>
                       </td>
-                      <td className="p-3 font-mono text-xs">{item.bach_best_match.score.toFixed(4)}</td>
+                      <td className="p-3 font-mono text-xs">{match.similarity_score?.toFixed(4) || 'N/A'}</td>
                     </tr>
                   ))}
                 </tbody>
