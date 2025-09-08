@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'http://localhost:8001'
+const SINGLE_IMAGE_API_URL = process.env.GIGAPATH_SINGLE_IMAGE_API_URL || 'https://8v9wob2mln55to-8006.proxy.runpod.net'
 
-// Configure route for long-running operations
-export const maxDuration = 900 // 15 minutes
+// Configure route for ML processing
+export const maxDuration = 300 // 5 minutes for ML inference
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: NextRequest) {
@@ -19,12 +19,13 @@ export async function POST(request: NextRequest) {
     }
 
     console.log(`Analyzing single image: ${image.name}`)
+    console.log(`Using API URL: ${SINGLE_IMAGE_API_URL}`)
 
     // Convert image to base64 for backend API
     const imageBuffer = await image.arrayBuffer()
     const imageBase64 = Buffer.from(imageBuffer).toString('base64')
 
-    // Create JSON payload as expected by fast_api.py
+    // Create JSON payload as expected by legitimate API
     const requestPayload = {
       input: {
         image_base64: imageBase64,
@@ -34,16 +35,17 @@ export async function POST(request: NextRequest) {
     }
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 900000) // 15 minutes
+    const timeoutId = setTimeout(() => controller.abort(), 300000) // 5 minutes - more realistic for ML processing
     
     const response = await fetch(`${SINGLE_IMAGE_API_URL}/api/single-image-analysis`, {
       method: 'POST',
       body: JSON.stringify(requestPayload),
       headers: {
         'Content-Type': 'application/json',
+        'Connection': 'keep-alive',
       },
       signal: controller.signal,
-      keepalive: true
+      keepalive: false // Disable keepalive to prevent connection reuse issues
     })
     
     clearTimeout(timeoutId)
